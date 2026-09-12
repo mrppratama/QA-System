@@ -1,29 +1,79 @@
 import { Router, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { upload } from '../middleware/upload';
 import { ExcelService } from '../services/excel/excel.service';
 import { prisma } from '../lib/prisma';
+import { supabase, BUCKET_NAME } from '../lib/supabase';
 import { z } from 'zod';
 
 const router = Router();
 const excelService = new ExcelService();
 
+// Helper to get Excel file Buffer from Supabase Storage or Local Disk
+async function getFileBuffer(fileRecord: { storedName: string; path: string }): Promise<Buffer | null> {
+  if (supabase) {
+    const { data, error } = await supabase.storage.from(BUCKET_NAME).download(fileRecord.storedName);
+    if (data && !error) {
+      const arrayBuffer = await data.arrayBuffer();
+      return Buffer.from(arrayBuffer);
+    }
+  }
+
+  // Fallback to local disk if available
+  if (fs.existsSync(fileRecord.path)) {
+    return fs.readFileSync(fileRecord.path);
+  }
+
+  return null;
+}
+
 // POST /api/excel/import
 router.post('/import', upload.single('file'), async (req: Request, res: Response) => {
   try {
-    if (!req.file) {
+    if (!req.file || !req.file.buffer) {
       return res.status(400).json({ success: false, error: 'No file uploaded' });
     }
 
-    const filePath = req.file.path;
-    const sheets = await excelService.readWorkbook(filePath);
+    const fileBuffer = req.file.buffer;
+    const sheets = await excelService.readWorkbookFromBuffer(fileBuffer);
+
+    const ext = path.extname(req.file.originalname).toLowerCase() || '.xlsx';
+    const random = crypto.randomBytes(8).toString('hex');
+    const storedName = `upload-${Date.now()}-${random}${ext}`;
+    const localUploadPath = path.resolve(process.cwd(), '../uploads', storedName);
+
+    // Try uploading to Supabase Storage if configured
+    let filePath = localUploadPath;
+    if (supabase) {
+      try {
+        const { error } = await supabase.storage.from(BUCKET_NAME).upload(storedName, fileBuffer, {
+          contentType: req.file.mimetype || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          upsert: true,
+        });
+        if (error) {
+          console.warn('[Supabase Storage Upload Warning]', error.message);
+        } else {
+          filePath = storedName;
+        }
+      } catch (err) {
+        console.warn('[Supabase Storage Exception]', err);
+      }
+    }
+
+    // Save local backup if filesystem is writable
+    try {
+      const uploadsDir = path.resolve(process.cwd(), '../uploads');
+      if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+      fs.writeFileSync(localUploadPath, fileBuffer);
+    } catch { /* ignore ephemeral fs errors */ }
 
     // Save file info to DB
     const excelFile = await prisma.excelFile.create({
       data: {
         originalName: req.file.originalname,
-        storedName: req.file.filename,
+        storedName,
         path: filePath,
         sheets: JSON.stringify(sheets.map(s => s.name)),
       },
@@ -52,11 +102,12 @@ router.get('/:id/sheets', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: 'File not found' });
     }
 
-    if (!fs.existsSync(file.path)) {
-      return res.status(404).json({ success: false, error: 'File no longer exists on disk' });
+    const buffer = await getFileBuffer(file);
+    if (!buffer) {
+      return res.status(404).json({ success: false, error: 'File no longer exists or could not be downloaded' });
     }
 
-    const sheets = await excelService.readWorkbook(file.path);
+    const sheets = await excelService.readWorkbookFromBuffer(buffer);
     return res.json({ success: true, sheets });
   } catch (err) {
     return res.status(500).json({ success: false, error: (err as Error).message });
@@ -76,7 +127,12 @@ router.get('/:id/mapping', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'sheet query param required' });
     }
 
-    const sheets = await excelService.readWorkbook(file.path);
+    const buffer = await getFileBuffer(file);
+    if (!buffer) {
+      return res.status(404).json({ success: false, error: 'File no longer exists or could not be downloaded' });
+    }
+
+    const sheets = await excelService.readWorkbookFromBuffer(buffer);
     const sheet = sheets.find(s => s.name === sheetName);
     if (!sheet) {
       return res.status(404).json({ success: false, error: `Sheet "${sheetName}" not found` });
@@ -117,10 +173,6 @@ router.post('/:id/add-test-cases', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: 'File not found' });
     }
 
-    if (!fs.existsSync(file.path)) {
-      return res.status(404).json({ success: false, error: 'File no longer exists on disk' });
-    }
-
     const parseResult = AddTestCasesSchema.safeParse(req.body);
     if (!parseResult.success) {
       return res.status(400).json({
@@ -132,10 +184,22 @@ router.post('/:id/add-test-cases', async (req: Request, res: Response) => {
 
     const { sheetName, testCases, columnMapping } = parseResult.data;
 
+    let tempFilePath = file.path;
+    const isLocal = fs.existsSync(file.path);
+
+    if (!isLocal) {
+      const buffer = await getFileBuffer(file);
+      if (!buffer) {
+        return res.status(404).json({ success: false, error: 'File no longer exists or could not be downloaded' });
+      }
+      tempFilePath = path.resolve(process.cwd(), '../uploads', `temp-${Date.now()}-${file.storedName}`);
+      fs.writeFileSync(tempFilePath, buffer);
+    }
+
     // Auto-detect mapping if not provided
     let mapping = columnMapping || {};
     if (Object.keys(mapping).length === 0) {
-      const sheets = await excelService.readWorkbook(file.path);
+      const sheets = await excelService.readWorkbook(tempFilePath);
       const sheet = sheets.find(s => s.name === sheetName);
       if (sheet) {
         mapping = excelService.detectColumnMapping(sheet.headers) as Record<string, string>;
@@ -143,7 +207,7 @@ router.post('/:id/add-test-cases', async (req: Request, res: Response) => {
     }
 
     const result = await excelService.addTestCasesToSheet(
-      file.path,
+      tempFilePath,
       sheetName,
       testCases.map(tc => ({
         id: tc.id,
@@ -162,6 +226,23 @@ router.post('/:id/add-test-cases', async (req: Request, res: Response) => {
       })),
       mapping
     );
+
+    // If modified, re-upload to Supabase Storage
+    if (supabase) {
+      try {
+        const updatedBuffer = fs.readFileSync(tempFilePath);
+        await supabase.storage.from(BUCKET_NAME).upload(file.storedName, updatedBuffer, {
+          contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          upsert: true,
+        });
+      } catch (err) {
+        console.warn('[Supabase Re-upload Error]', err);
+      }
+    }
+
+    if (!isLocal) {
+      try { fs.unlinkSync(tempFilePath); } catch {}
+    }
 
     return res.json({
       success: true,
@@ -182,16 +263,15 @@ router.get('/:id/export', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: 'File not found' });
     }
 
-    if (!fs.existsSync(file.path)) {
+    const buffer = await getFileBuffer(file);
+    if (!buffer) {
       return res.status(404).json({ success: false, error: 'File no longer exists' });
     }
 
     const safeName = file.originalName.replace(/[^a-zA-Z0-9._-]/g, '_');
     res.setHeader('Content-Disposition', `attachment; filename="${safeName}"`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-
-    const fileStream = fs.createReadStream(file.path);
-    fileStream.pipe(res);
+    return res.send(buffer);
   } catch (err) {
     return res.status(500).json({ success: false, error: (err as Error).message });
   }
@@ -225,11 +305,8 @@ router.post('/export-new', async (req: Request, res: Response) => {
     }
 
     const { testCases, filename } = parseResult.data;
-    const safeFilename = `QA-Test-Cases-${Date.now()}.xlsx`;
-
-    const exportPath = await excelService.createNewWorkbook(
-      testCases.map(tc => ({ ...tc, id: tc.id })),
-      safeFilename
+    const buffer = await excelService.createNewWorkbookBuffer(
+      testCases.map(tc => ({ ...tc, id: tc.id }))
     );
 
     const downloadName = filename
@@ -238,14 +315,7 @@ router.post('/export-new', async (req: Request, res: Response) => {
 
     res.setHeader('Content-Disposition', `attachment; filename="${downloadName}"`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-
-    const stream = fs.createReadStream(exportPath);
-    stream.pipe(res);
-    stream.on('close', () => {
-      setTimeout(() => {
-        try { fs.unlinkSync(exportPath); } catch {}
-      }, 5000);
-    });
+    return res.send(buffer);
   } catch (err) {
     console.error('[Export New]', err);
     return res.status(500).json({ success: false, error: (err as Error).message });
@@ -266,9 +336,8 @@ router.post('/export-project/:projectId', async (req: Request, res: Response) =>
 
     const project = await prisma.project.findUnique({ where: { id: req.params.projectId } });
     const projectName = project?.name || 'Project';
-    const safeFilename = `${projectName.replace(/[^a-zA-Z0-9]/g, '-')}-TestCases-${Date.now()}.xlsx`;
 
-    const exportPath = await excelService.createNewWorkbook(
+    const buffer = await excelService.createNewWorkbookBuffer(
       testCases.map(tc => ({
         id: tc.testCaseId,
         featureModule: tc.featureModule,
@@ -283,21 +352,13 @@ router.post('/export-project/:projectId', async (req: Request, res: Response) =>
         testDate: tc.testDate || '',
         testBy: tc.testBy || '',
         bugNote: tc.bugNote || '',
-      })),
-      safeFilename
+      }))
     );
 
     const downloadName = `${projectName.replace(/[^a-zA-Z0-9]/g, '-')}-TestCases.xlsx`;
     res.setHeader('Content-Disposition', `attachment; filename="${downloadName}"`);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-
-    const stream = fs.createReadStream(exportPath);
-    stream.pipe(res);
-    stream.on('close', () => {
-      setTimeout(() => {
-        try { fs.unlinkSync(exportPath); } catch {}
-      }, 5000);
-    });
+    return res.send(buffer);
   } catch (err) {
     console.error('[Export Project]', err);
     return res.status(500).json({ success: false, error: (err as Error).message });

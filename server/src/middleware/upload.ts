@@ -8,18 +8,7 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    cb(null, uploadsDir);
-  },
-  filename: (_req, file, cb) => {
-    // Sanitize filename
-    const ext = path.extname(file.originalname).toLowerCase();
-    const random = crypto.randomBytes(8).toString('hex');
-    const safeFilename = `upload-${Date.now()}-${random}${ext}`;
-    cb(null, safeFilename);
-  },
-});
+const storage = multer.memoryStorage();
 
 const fileFilter = (
   _req: Express.Request,

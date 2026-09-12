@@ -79,7 +79,16 @@ export class ExcelService {
   async readWorkbook(filePath: string): Promise<SheetInfo[]> {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(filePath);
+    return this.extractSheetsFromWorkbook(workbook);
+  }
 
+  async readWorkbookFromBuffer(buffer: Buffer): Promise<SheetInfo[]> {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+    return this.extractSheetsFromWorkbook(workbook);
+  }
+
+  private extractSheetsFromWorkbook(workbook: ExcelJS.Workbook): SheetInfo[] {
     const sheets: SheetInfo[] = [];
 
     workbook.worksheets.forEach(ws => {
@@ -327,6 +336,63 @@ export class ExcelService {
     const exportPath = path.join(this.exportsDir, filename);
     await workbook.xlsx.writeFile(exportPath);
     return exportPath;
+  }
+
+  async createNewWorkbookBuffer(testCases: TestCaseRow[]): Promise<Buffer> {
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'QA Test Case Generator';
+    workbook.created = new Date();
+
+    const ws = workbook.addWorksheet('Test Cases');
+
+    ws.columns = [
+      { header: 'Test Case ID', key: 'testCaseId', width: 15 },
+      { header: 'Feature/Module', key: 'featureModule', width: 20 },
+      { header: 'Test Scenario', key: 'testScenario', width: 40 },
+      { header: 'Type', key: 'type', width: 15 },
+      { header: 'Precondition', key: 'precondition', width: 30 },
+      { header: 'Action Step', key: 'actionStep', width: 40 },
+      { header: 'Test Data', key: 'testData', width: 20 },
+      { header: 'Expected Result', key: 'expectedResult', width: 40 },
+      { header: 'Actual Result', key: 'actualResult', width: 30 },
+      { header: 'Testing Result', key: 'testingResult', width: 15 },
+      { header: 'Test Date', key: 'testDate', width: 15 },
+      { header: 'Test By', key: 'testBy', width: 15 },
+      { header: 'Bug Note', key: 'bugNote', width: 30 },
+    ];
+
+    const headerRow = ws.getRow(1);
+    headerRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF1E3A5F' },
+    };
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+
+    testCases.forEach(tc => {
+      ws.addRow({
+        testCaseId: sanitizeCellValue(tc.id),
+        featureModule: sanitizeCellValue(tc.featureModule),
+        testScenario: sanitizeCellValue(tc.testScenario),
+        type: sanitizeCellValue(tc.type),
+        precondition: sanitizeCellValue(tc.precondition),
+        actionStep: sanitizeCellValue(tc.actionStep),
+        testData: sanitizeCellValue(tc.testData),
+        expectedResult: sanitizeCellValue(tc.expectedResult),
+        actualResult: sanitizeCellValue(tc.actualResult || ''),
+        testingResult: sanitizeCellValue(tc.testingResult || ''),
+        testDate: sanitizeCellValue(tc.testDate || ''),
+        testBy: sanitizeCellValue(tc.testBy || ''),
+        bugNote: sanitizeCellValue(tc.bugNote || ''),
+      });
+    });
+
+    ws.getColumn('actionStep').alignment = { wrapText: true, vertical: 'top' };
+    ws.getColumn('expectedResult').alignment = { wrapText: true, vertical: 'top' };
+    ws.getColumn('precondition').alignment = { wrapText: true, vertical: 'top' };
+
+    const arrayBuffer = await workbook.xlsx.writeBuffer();
+    return Buffer.from(arrayBuffer);
   }
 
   getUploadPath(filename: string): string {
