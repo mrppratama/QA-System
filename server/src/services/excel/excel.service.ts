@@ -120,25 +120,35 @@ export class ExcelService {
     const matchRules: Record<keyof ColumnMapping, string[]> = {
       testCaseId: ['test case id', 'testcaseid', 'tc id', 'id', 'no', 'number'],
       featureModule: ['feature/module', 'feature', 'module', 'fitur', 'modul'],
-      testScenario: ['test scenario', 'scenario', 'skenario', 'test case', 'deskripsi'],
+      testScenario: ['test scenario', 'scenario', 'skenario', 'deskripsi'],
       type: ['type', 'tipe', 'jenis', 'category'],
       precondition: ['precondition', 'pre-condition', 'prasyarat', 'kondisi awal'],
       actionStep: ['action step', 'steps', 'step', 'langkah', 'action', 'test step'],
       testData: ['test data', 'data', 'input data'],
       expectedResult: ['expected result', 'expected', 'ekspektasi', 'hasil yang diharapkan'],
       actualResult: ['actual result', 'actual', 'hasil aktual', 'hasil sebenarnya'],
-      testingResult: ['testing result', 'result', 'status', 'pass/fail', 'keterangan'],
+      testingResult: ['testing result', 'status', 'pass/fail', 'keterangan'],
       testDate: ['test date', 'date', 'tanggal', 'tanggal test'],
       testBy: ['test by', 'tester', 'tested by', 'ditest oleh'],
       bugNote: ['bug note', 'bug', 'catatan bug', 'note', 'catatan'],
     };
 
-    headers.forEach((header, index) => {
+    headers.forEach((header) => {
       const normalized = header.toLowerCase().trim();
       
+      // 1. First try exact match
       for (const [field, patterns] of Object.entries(matchRules)) {
         if (!mapping[field as keyof ColumnMapping]) {
-          if (patterns.some(p => normalized === p || normalized.includes(p))) {
+          if (patterns.some(p => normalized === p)) {
+            mapping[field as keyof ColumnMapping] = header;
+          }
+        }
+      }
+
+      // 2. Fallback to contains match
+      for (const [field, patterns] of Object.entries(matchRules)) {
+        if (!mapping[field as keyof ColumnMapping]) {
+          if (patterns.some(p => normalized.includes(p))) {
             mapping[field as keyof ColumnMapping] = header;
           }
         }
