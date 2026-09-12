@@ -8,6 +8,7 @@ interface AuthContextValue {
   configured: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
+  updateDisplayName: (name: string) => Promise<{ error: string | null }>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -46,8 +47,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase?.auth.signOut();
   };
 
+  const updateDisplayName = async (name: string): Promise<{ error: string | null }> => {
+    if (!supabase) {
+      return { error: 'Supabase belum dikonfigurasi.' };
+    }
+    const { data, error } = await supabase.auth.updateUser({ data: { full_name: name } });
+    if (error) return { error: error.message };
+    // onAuthStateChange should also fire a USER_UPDATED event, but update
+    // immediately too so the UI reflects the change without waiting on it.
+    if (data.user) setSession(prev => (prev ? { ...prev, user: data.user } : prev));
+    return { error: null };
+  };
+
   return (
-    <AuthContext.Provider value={{ session, loading, configured: !!supabase, signIn, signOut }}>
+    <AuthContext.Provider value={{ session, loading, configured: !!supabase, signIn, signOut, updateDisplayName }}>
       {children}
     </AuthContext.Provider>
   );

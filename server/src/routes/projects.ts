@@ -101,7 +101,7 @@ router.get('/:id/history', async (req: Request, res: Response) => {
 // GET /api/projects/:id/test-cases
 router.get('/:id/test-cases', async (req: Request, res: Response) => {
   try {
-    const { search, type, testingResult, automationStatus, page = '1', limit = '50' } = req.query;
+    const { search, type, testingResult, automationStatus, testBy, page = '1', limit = '50' } = req.query;
 
     const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
     const limitNum = Math.min(200, Math.max(1, parseInt(limit as string, 10) || 50));
@@ -114,6 +114,7 @@ router.get('/:id/test-cases', async (req: Request, res: Response) => {
     if (type) where.type = type as string;
     if (testingResult) where.testingResult = testingResult as string;
     if (automationStatus) where.automationStatus = automationStatus as string;
+    if (testBy) where.testBy = testBy as string;
 
     if (search) {
       const s = search as string;
@@ -146,6 +147,25 @@ router.get('/:id/test-cases', async (req: Request, res: Response) => {
       limit: limitNum,
       pages: Math.ceil(total / limitNum),
     });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: (err as Error).message });
+  }
+});
+
+// GET /api/projects/:id/testers — distinct "Test By" values used in this project, for the filter dropdown
+router.get('/:id/testers', async (req: Request, res: Response) => {
+  try {
+    const rows = await prisma.testCase.findMany({
+      where: {
+        testCaseSet: { projectId: req.params.id },
+        testBy: { not: null },
+      },
+      distinct: ['testBy'],
+      select: { testBy: true },
+      orderBy: { testBy: 'asc' },
+    });
+    const testers = rows.map(r => r.testBy).filter((t): t is string => !!t && t.trim() !== '');
+    return res.json({ success: true, testers });
   } catch (err) {
     return res.status(500).json({ success: false, error: (err as Error).message });
   }

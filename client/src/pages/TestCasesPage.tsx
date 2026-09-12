@@ -13,6 +13,7 @@ interface EditModalProps {
   onChange: (values: Partial<TestCase>) => void;
   onSave: () => void;
   onCancel: () => void;
+  testers: { id: string; email: string; name?: string }[];
 }
 
 // Result badge colors untuk custom select
@@ -48,9 +49,9 @@ function StyledTextarea({ value, onChange, placeholder, rows = 3 }: {
   );
 }
 
-function StyledInput({ value, onChange, placeholder, type = 'text' }: {
+function StyledInput({ value, onChange, placeholder, type = 'text', list }: {
   value: string; onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  placeholder?: string; type?: string;
+  placeholder?: string; type?: string; list?: string;
 }) {
   return (
     <input
@@ -58,6 +59,7 @@ function StyledInput({ value, onChange, placeholder, type = 'text' }: {
       placeholder={placeholder}
       value={value}
       onChange={onChange}
+      list={list}
       className="w-full px-3 py-2.5 text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-lg
                  focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 focus:bg-white
                  placeholder-gray-300 transition"
@@ -65,7 +67,7 @@ function StyledInput({ value, onChange, placeholder, type = 'text' }: {
   );
 }
 
-function EditModal({ tc, editValues, onChange, onSave, onCancel }: EditModalProps) {
+function EditModal({ tc, editValues, onChange, onSave, onCancel, testers }: EditModalProps) {
   const set = (field: keyof TestCase) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
       onChange({ ...editValues, [field]: e.target.value });
@@ -87,7 +89,7 @@ function EditModal({ tc, editValues, onChange, onSave, onCancel }: EditModalProp
               </span>
               <span className="text-xs text-gray-400">{tc.featureModule}</span>
             </div>
-            <h3 className="text-base font-semibold text-gray-900">Update Hasil Testing</h3>
+            <h3 className="text-base font-semibold text-gray-900">Edit Test Case</h3>
           </div>
           <button
             onClick={onCancel}
@@ -101,6 +103,83 @@ function EditModal({ tc, editValues, onChange, onSave, onCancel }: EditModalProp
 
         {/* ── Body ── */}
         <div className="px-6 py-5 space-y-5 overflow-y-auto flex-1">
+
+          {/* Detail Test Case */}
+          <div className="space-y-4">
+            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Detail Test Case</p>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <FieldLabel>Feature/Module</FieldLabel>
+                <StyledInput
+                  placeholder="e.g. Login"
+                  value={editValues.featureModule || ''}
+                  onChange={set('featureModule')}
+                />
+              </div>
+              <div>
+                <FieldLabel>Type</FieldLabel>
+                <select
+                  className="w-full px-3 py-2.5 text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-lg
+                             focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 focus:bg-white
+                             transition cursor-pointer"
+                  value={editValues.type || ''}
+                  onChange={set('type')}
+                >
+                  {TEST_CASE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <FieldLabel>Test Scenario</FieldLabel>
+              <StyledTextarea
+                rows={2}
+                value={editValues.testScenario || ''}
+                onChange={set('testScenario')}
+              />
+            </div>
+
+            <div>
+              <FieldLabel>Precondition</FieldLabel>
+              <StyledTextarea
+                rows={2}
+                value={editValues.precondition || ''}
+                onChange={set('precondition')}
+              />
+            </div>
+
+            <div>
+              <FieldLabel>Action Step</FieldLabel>
+              <StyledTextarea
+                rows={4}
+                value={editValues.actionStep || ''}
+                onChange={set('actionStep')}
+              />
+            </div>
+
+            <div>
+              <FieldLabel>Test Data</FieldLabel>
+              <StyledTextarea
+                rows={2}
+                value={editValues.testData || ''}
+                onChange={set('testData')}
+              />
+            </div>
+
+            <div>
+              <FieldLabel>Expected Result</FieldLabel>
+              <StyledTextarea
+                rows={3}
+                value={editValues.expectedResult || ''}
+                onChange={set('expectedResult')}
+              />
+            </div>
+          </div>
+
+          <hr className="border-gray-100" />
+
+          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Hasil Testing</p>
 
           {/* Result & Auto status */}
           <div className="grid grid-cols-2 gap-4">
@@ -210,10 +289,15 @@ function EditModal({ tc, editValues, onChange, onSave, onCancel }: EditModalProp
             <div>
               <FieldLabel>Test By</FieldLabel>
               <StyledInput
-                placeholder="Nama tester"
+                placeholder="Pilih atau ketik nama tester"
                 value={editValues.testBy || ''}
                 onChange={set('testBy')}
+                list="testers-list"
               />
+              {/* Autocomplete dari user terdaftar — tetap bisa ketik nama bebas */}
+              <datalist id="testers-list">
+                {testers.map(u => <option key={u.id} value={u.name || u.email} />)}
+              </datalist>
             </div>
           </div>
         </div>
@@ -231,6 +315,202 @@ function EditModal({ tc, editValues, onChange, onSave, onCancel }: EditModalProp
             className="px-5 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 active:scale-95 transition shadow-sm shadow-blue-200"
           >
             Simpan Perubahan
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Quick Field Modal — buat edit satu field aja (Actual Result / Bug Note) ─────
+interface QuickFieldModalProps {
+  tc: TestCase;
+  label: string;
+  placeholder?: string;
+  value: string;
+  onChange: (value: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+  saving: boolean;
+}
+
+function QuickFieldModal({ tc, label, placeholder, value, onChange, onSave, onCancel, saving }: QuickFieldModalProps) {
+  return (
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col">
+        {/* ── Header ── */}
+        <div className="px-6 pt-5 pb-4 border-b border-gray-100 flex items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 mb-0.5">
+              <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+                {tc.testCaseId}
+              </span>
+              <span className="text-xs text-gray-400">{tc.featureModule}</span>
+            </div>
+            <h3 className="text-base font-semibold text-gray-900">{label}</h3>
+          </div>
+          <button
+            onClick={onCancel}
+            className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* ── Body ── */}
+        <div className="px-6 py-5">
+          <StyledTextarea
+            rows={5}
+            placeholder={placeholder}
+            value={value}
+            onChange={e => onChange(e.target.value)}
+          />
+        </div>
+
+        {/* ── Footer ── */}
+        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-2">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition"
+          >
+            Batal
+          </button>
+          <button
+            onClick={onSave}
+            disabled={saving}
+            className="px-5 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 active:scale-95 transition shadow-sm shadow-blue-200 disabled:opacity-50"
+          >
+            {saving ? 'Menyimpan...' : 'Simpan'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Add Test Case Modal (manual, not via AI generate) ───────────────────────────
+interface AddTestCaseModalProps {
+  values: ManualTestCaseInput;
+  onChange: (values: ManualTestCaseInput) => void;
+  onSave: () => void;
+  onCancel: () => void;
+  saving: boolean;
+}
+
+function AddTestCaseModal({ values, onChange, onSave, onCancel, saving }: AddTestCaseModalProps) {
+  const set = <K extends keyof ManualTestCaseInput>(field: K) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
+      onChange({ ...values, [field]: e.target.value });
+
+  return (
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl flex flex-col" style={{ maxHeight: '90vh' }}>
+
+        {/* ── Header ── */}
+        <div className="px-6 pt-5 pb-4 border-b border-gray-100 flex items-start justify-between gap-3 flex-shrink-0">
+          <h3 className="text-base font-semibold text-gray-900">Add Test Case</h3>
+          <button
+            onClick={onCancel}
+            className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* ── Body ── */}
+        <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <FieldLabel>Feature/Module <span className="text-red-500">*</span></FieldLabel>
+              <StyledInput
+                placeholder="e.g. Login"
+                value={values.featureModule}
+                onChange={set('featureModule')}
+              />
+            </div>
+            <div>
+              <FieldLabel>Type</FieldLabel>
+              <select
+                className="w-full px-3 py-2.5 text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-lg
+                           focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 focus:bg-white
+                           transition cursor-pointer"
+                value={values.type}
+                onChange={set('type')}
+              >
+                {TEST_CASE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <FieldLabel>Test Scenario <span className="text-red-500">*</span></FieldLabel>
+            <StyledTextarea
+              rows={2}
+              placeholder="Apa yang diuji…"
+              value={values.testScenario}
+              onChange={set('testScenario')}
+            />
+          </div>
+
+          <div>
+            <FieldLabel>Precondition</FieldLabel>
+            <StyledTextarea
+              rows={2}
+              placeholder="Kondisi awal sebelum test…"
+              value={values.precondition}
+              onChange={set('precondition')}
+            />
+          </div>
+
+          <div>
+            <FieldLabel>Action Step <span className="text-red-500">*</span></FieldLabel>
+            <StyledTextarea
+              rows={4}
+              placeholder={'1. Buka halaman…\n2. Klik tombol…'}
+              value={values.actionStep}
+              onChange={set('actionStep')}
+            />
+          </div>
+
+          <div>
+            <FieldLabel>Test Data</FieldLabel>
+            <StyledTextarea
+              rows={2}
+              placeholder="Data yang dipakai untuk test…"
+              value={values.testData}
+              onChange={set('testData')}
+            />
+          </div>
+
+          <div>
+            <FieldLabel>Expected Result <span className="text-red-500">*</span></FieldLabel>
+            <StyledTextarea
+              rows={3}
+              placeholder="Apa yang seharusnya terjadi…"
+              value={values.expectedResult}
+              onChange={set('expectedResult')}
+            />
+          </div>
+        </div>
+
+        {/* ── Footer ── */}
+        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-2 flex-shrink-0">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition"
+          >
+            Batal
+          </button>
+          <button
+            onClick={onSave}
+            disabled={saving}
+            className="px-5 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 active:scale-95 transition shadow-sm shadow-blue-200 disabled:opacity-50"
+          >
+            {saving ? 'Menyimpan...' : 'Simpan'}
           </button>
         </div>
       </div>
@@ -260,6 +540,36 @@ const AUTO_STATUS_COLORS: Record<string, string> = {
   Automated: 'bg-green-100 text-green-700',
 };
 
+const HIDDEN_COLS_KEY = 'qa_testcases_hidden_cols';
+
+const OPTIONAL_COLUMNS: { key: string; label: string }[] = [
+  { key: 'precondition', label: 'Precondition' },
+  { key: 'testData',     label: 'Test Data' },
+  { key: 'testDate',     label: 'Test Date' },
+  { key: 'testBy',       label: 'Test By' },
+  { key: 'bugNote',      label: 'Bug Note' },
+];
+
+interface ManualTestCaseInput {
+  featureModule: string;
+  testScenario: string;
+  type: string;
+  precondition: string;
+  actionStep: string;
+  testData: string;
+  expectedResult: string;
+}
+
+const EMPTY_MANUAL_TEST_CASE: ManualTestCaseInput = {
+  featureModule: '',
+  testScenario: '',
+  type: TEST_CASE_TYPES[0],
+  precondition: '',
+  actionStep: '',
+  testData: '',
+  expectedResult: '',
+};
+
 // format tanggal ke YYYY-MM-DD dari ISO string
 function toDateInput(isoStr?: string): string {
   if (!isoStr) return '';
@@ -276,10 +586,30 @@ function formatDate(dateStr?: string): string {
 }
 
 // Helper: cell content wrapper
-function Cell({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+function Cell({ children, className = '', onClick, onExpand, expanded, expandTitle }: {
+  children: React.ReactNode;
+  className?: string;
+  onClick?: () => void;       // opens the edit modal (only for fields that modal can actually edit)
+  onExpand?: () => void;      // toggles clamped/full view — for read-only long text
+  expanded?: boolean;
+  expandTitle?: string;
+}) {
+  const handleClick = onClick ?? onExpand;
+  const title = onClick
+    ? 'Klik untuk edit'
+    : onExpand
+      ? (expanded ? 'Klik untuk ciutkan' : (expandTitle || 'Klik untuk lihat teks lengkap'))
+      : undefined;
+
   return (
     <td className="px-2 py-1.5 align-top border-t border-gray-100">
-      <div className={`max-h-16 overflow-y-auto text-xs leading-relaxed text-gray-700 ${className}`}>
+      <div
+        onClick={handleClick}
+        title={title}
+        className={`${expanded ? '' : 'line-clamp-3'} whitespace-pre-line text-xs leading-relaxed text-gray-700 ${
+          handleClick ? 'cursor-pointer hover:text-blue-700' : ''
+        } ${className}`}
+      >
         {children}
       </div>
     </td>
@@ -300,12 +630,52 @@ export function TestCasesPage() {
   const [filterType, setFilterType] = useState('');
   const [filterResult, setFilterResult] = useState('');
   const [filterAutoStatus, setFilterAutoStatus] = useState('');
+  const [filterTestBy, setFilterTestBy] = useState('');
+  const [projectTesters, setProjectTesters] = useState<string[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Partial<TestCase>>({});
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [hiddenCols, setHiddenCols] = useState<Set<string>>(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(HIDDEN_COLS_KEY) || '[]');
+      return new Set(Array.isArray(stored) ? stored : []);
+    } catch {
+      return new Set();
+    }
+  });
+  const [showColumnMenu, setShowColumnMenu] = useState(false);
+
+  // Manual "Add Test Case"
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addValues, setAddValues] = useState<ManualTestCaseInput>(EMPTY_MANUAL_TEST_CASE);
+  const [addSaving, setAddSaving] = useState(false);
+
+  const toggleColumn = (key: string) => {
+    setHiddenCols(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      localStorage.setItem(HIDDEN_COLS_KEY, JSON.stringify(Array.from(next)));
+      return next;
+    });
+  };
+
+  // Per-ROW expand/collapse for long, read-only fields (not editable via the
+  // "Update Hasil Testing" modal) — clicking any one of them expands ALL of
+  // that row's read-only cells together (the row is already taller once one
+  // cell expands, so showing the rest too avoids dead empty space).
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const toggleExpand = (id: string) => {
+    setExpandedRows(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   // Debounce search input — avoid firing 1 API request per keystroke
   useEffect(() => {
@@ -327,6 +697,7 @@ export function TestCasesPage() {
         type: filterType || undefined,
         testingResult: filterResult || undefined,
         automationStatus: filterAutoStatus || undefined,
+        testBy: filterTestBy || undefined,
         limit: 200,
       }, controller.signal);
       setTestCases(res.testCases);
@@ -338,12 +709,24 @@ export function TestCasesPage() {
     } finally {
       if (inFlightRef.current === controller) setLoading(false);
     }
-  }, [activeProject, debouncedSearch, filterType, filterResult, filterAutoStatus, onToast]);
+  }, [activeProject, debouncedSearch, filterType, filterResult, filterAutoStatus, filterTestBy, onToast]);
 
   useEffect(() => {
     loadTestCases();
     return () => inFlightRef.current?.abort();
   }, [loadTestCases]);
+
+  // Registered users, for the "Test By" picker (still allows typing a custom name)
+  const [testers, setTesters] = useState<{ id: string; email: string; name?: string }[]>([]);
+  useEffect(() => {
+    api.getUsers().then(res => setTesters(res.users)).catch(() => {});
+  }, []);
+
+  // Distinct "Test By" values actually used in this project, for the filter dropdown
+  useEffect(() => {
+    if (!activeProject) return;
+    api.getProjectTesters(activeProject.id).then(res => setProjectTesters(res.testers)).catch(() => {});
+  }, [activeProject]);
 
   const allSelected = testCases.length > 0 && selectedIds.size === testCases.length;
   const someSelected = selectedIds.size > 0 && selectedIds.size < testCases.length;
@@ -363,6 +746,15 @@ export function TestCasesPage() {
   const startEdit = (tc: TestCase) => {
     setEditingId(tc.id);
     setEditValues({
+      // Detail test case
+      featureModule: tc.featureModule,
+      testScenario: tc.testScenario,
+      type: tc.type,
+      precondition: tc.precondition || '',
+      actionStep: tc.actionStep,
+      testData: tc.testData || '',
+      expectedResult: tc.expectedResult,
+      // Hasil testing
       testingResult: tc.testingResult,
       actualResult: tc.actualResult || '',
       // Default testDate ke createdAt jika belum diisi
@@ -454,6 +846,65 @@ export function TestCasesPage() {
     }
   };
 
+  // Quick single-field editors (Actual Result / Bug Note) — separate from the
+  // full "Edit Test Case" modal opened via the Actions pencil icon.
+  const [quickField, setQuickField] = useState<{ id: string; field: 'actualResult' | 'bugNote'; value: string } | null>(null);
+  const [quickFieldSaving, setQuickFieldSaving] = useState(false);
+
+  const openQuickField = (tc: TestCase, field: 'actualResult' | 'bugNote') => {
+    setQuickField({ id: tc.id, field, value: tc[field] || '' });
+  };
+
+  const saveQuickField = async () => {
+    if (!quickField) return;
+    setQuickFieldSaving(true);
+    try {
+      const res = await api.updateTestCase(quickField.id, { [quickField.field]: quickField.value });
+      setTestCases(prev => prev.map(tc => tc.id === quickField.id ? { ...tc, ...res.testCase } : tc));
+      setQuickField(null);
+      onToast('success', 'Test case updated');
+    } catch (err) {
+      onToast('error', 'Failed to update test case', (err as Error).message);
+    } finally {
+      setQuickFieldSaving(false);
+    }
+  };
+
+  const openAddModal = () => {
+    setAddValues(EMPTY_MANUAL_TEST_CASE);
+    setShowAddModal(true);
+  };
+
+  const handleAddTestCase = async () => {
+    if (!activeProject) return;
+    if (!addValues.featureModule.trim() || !addValues.testScenario.trim() || !addValues.actionStep.trim() || !addValues.expectedResult.trim()) {
+      onToast('warning', 'Lengkapi dulu', 'Feature/Module, Test Scenario, Action Step, dan Expected Result wajib diisi');
+      return;
+    }
+    setAddSaving(true);
+    try {
+      const res = await api.saveTestCases(activeProject.id, {
+        feature: addValues.featureModule.trim(),
+        testCases: [{
+          featureModule: addValues.featureModule.trim(),
+          testScenario: addValues.testScenario.trim(),
+          type: addValues.type,
+          precondition: addValues.precondition.trim(),
+          actionStep: addValues.actionStep.trim(),
+          testData: addValues.testData.trim() || '-',
+          expectedResult: addValues.expectedResult.trim(),
+        }],
+      });
+      setShowAddModal(false);
+      onToast('success', 'Test case added', res.testCases[0]?.testCaseId);
+      await loadTestCases(); // re-fetch so the new item respects active search/filters, pagination and total count
+    } catch (err) {
+      onToast('error', 'Failed to add test case', (err as Error).message);
+    } finally {
+      setAddSaving(false);
+    }
+  };
+
   if (!activeProject) {
     return (
       <div className="card p-12 flex flex-col items-center text-center text-gray-400 max-w-2xl mx-auto">
@@ -466,23 +917,25 @@ export function TestCasesPage() {
     );
   }
 
-  // Kolom dengan min-width; lebar akhir tetap auto mengikuti konten terlebar
-  const COLS: { label: string; min: number }[] = [
-    { label: 'Test Case ID',    min: 90  },
-    { label: 'Feature/Module',  min: 130 },
-    { label: 'Test Scenario',   min: 220 },
-    { label: 'Type',            min: 90  },
-    { label: 'Precondition',    min: 180 },
-    { label: 'Action Step',     min: 220 },
-    { label: 'Test Data',       min: 110 },
-    { label: 'Expected Result', min: 200 },
-    { label: 'Actual Result',   min: 190 },
-    { label: 'Testing Result',  min: 110 },
-    { label: 'Test Date',       min: 95  },
-    { label: 'Test By',         min: 85  },
-    { label: 'Bug Note',        min: 200 },
-    { label: 'Actions',         min: 64  },
-  ];
+  // Kolom dengan min-width; lebar akhir tetap auto mengikuti konten terlebar.
+  // `key` dipakai untuk cocokkan header ↔ body cell dan untuk show/hide kolom.
+  const COLS: { key: string; label: string; min: number }[] = [
+    { key: 'testCaseId',       label: 'Test Case ID',       min: 90  },
+    { key: 'featureModule',    label: 'Feature/Module',     min: 130 },
+    { key: 'testScenario',     label: 'Test Scenario',      min: 220 },
+    { key: 'type',             label: 'Type',               min: 90  },
+    { key: 'precondition',     label: 'Precondition',       min: 180 },
+    { key: 'actionStep',       label: 'Action Step',        min: 220 },
+    { key: 'testData',         label: 'Test Data',          min: 110 },
+    { key: 'expectedResult',   label: 'Expected Result',    min: 200 },
+    { key: 'actualResult',     label: 'Actual Result',      min: 190 },
+    { key: 'testingResult',    label: 'Testing Result',     min: 110 },
+    { key: 'automationStatus', label: 'Automation Status',  min: 130 },
+    { key: 'testDate',         label: 'Test Date',          min: 95  },
+    { key: 'testBy',           label: 'Test By',            min: 85  },
+    { key: 'bugNote',          label: 'Bug Note',           min: 200 },
+    { key: 'actions',          label: 'Actions',            min: 64  },
+  ].filter(c => !hiddenCols.has(c.key));
 
   return (
     <div>
@@ -520,6 +973,15 @@ export function TestCasesPage() {
             {exporting ? 'Exporting...' : 'Export XLSX'}
           </button>
           <button
+            onClick={openAddModal}
+            className="btn-secondary text-xs flex items-center gap-1.5"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Add Test Case
+          </button>
+          <button
             onClick={() => navigate("../generate")}
             className="btn-primary text-xs flex items-center gap-1.5"
           >
@@ -554,6 +1016,7 @@ export function TestCasesPage() {
             { value: filterType,       onChange: (v: string) => setFilterType(v),       placeholder: 'All Types',      options: TEST_CASE_TYPES as readonly string[]    },
             { value: filterResult,     onChange: (v: string) => setFilterResult(v),     placeholder: 'All Results',    options: TESTING_RESULTS as readonly string[]   },
             { value: filterAutoStatus, onChange: (v: string) => setFilterAutoStatus(v), placeholder: 'All Auto Status',options: AUTOMATION_STATUSES as readonly string[]},
+            { value: filterTestBy,     onChange: (v: string) => setFilterTestBy(v),     placeholder: 'All Testers',    options: projectTesters },
           ].map((f, i) => (
             <div key={i} className="relative">
               <select
@@ -572,6 +1035,50 @@ export function TestCasesPage() {
               </svg>
             </div>
           ))}
+
+          {/* Column visibility toggle */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowColumnMenu(v => !v)}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs bg-gray-50 border border-gray-200 rounded-lg
+                         hover:bg-gray-100 transition text-gray-600"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 4v16M15 4v16M4 8h4m8 0h4M4 16h4m8 0h4" />
+              </svg>
+              Columns
+              {hiddenCols.size > 0 && (
+                <span className="bg-blue-100 text-blue-700 rounded-full px-1.5 text-[10px] font-medium">
+                  {hiddenCols.size} hidden
+                </span>
+              )}
+            </button>
+            {showColumnMenu && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setShowColumnMenu(false)} />
+                <div className="absolute right-0 top-full mt-1 z-40 bg-white border border-gray-200 rounded-lg shadow-lg p-2 w-48">
+                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide px-2 pb-1.5">
+                    Show/Hide Columns
+                  </p>
+                  {OPTIONAL_COLUMNS.map(col => (
+                    <label
+                      key={col.key}
+                      className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer text-xs text-gray-700"
+                    >
+                      <input
+                        type="checkbox"
+                        className="rounded"
+                        checked={!hiddenCols.has(col.key)}
+                        onChange={() => toggleColumn(col.key)}
+                      />
+                      {col.label}
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -591,11 +1098,11 @@ export function TestCasesPage() {
           </svg>
           <p className="text-sm font-medium text-gray-500">No test cases found</p>
           <p className="text-xs mt-1">
-            {search || filterType || filterResult || filterAutoStatus
+            {search || filterType || filterResult || filterAutoStatus || filterTestBy
               ? 'Try clearing your filters'
               : 'Generate test cases to get started'}
           </p>
-          {!search && !filterType && !filterResult && !filterAutoStatus && (
+          {!search && !filterType && !filterResult && !filterAutoStatus && !filterTestBy && (
             <button onClick={() => navigate("../generate")} className="mt-4 btn-primary text-sm">
               Generate Test Cases
             </button>
@@ -607,7 +1114,7 @@ export function TestCasesPage() {
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="bg-gray-900 text-white">
-                  <th className="px-2 py-2.5 text-center w-9 flex-shrink-0">
+                  <th className="sticky top-0 z-10 bg-gray-900 px-2 py-2.5 text-center w-9 flex-shrink-0">
                     <input
                       type="checkbox"
                       className="rounded"
@@ -616,11 +1123,11 @@ export function TestCasesPage() {
                       onChange={toggleSelectAll}
                     />
                   </th>
-                  {COLS.map((col, i) => (
+                  {COLS.map(col => (
                     <th
-                      key={i}
+                      key={col.key}
                       style={{ minWidth: col.min }}
-                      className="px-3 py-2.5 text-left text-xs font-medium whitespace-nowrap text-white"
+                      className="sticky top-0 z-10 bg-gray-900 px-3 py-2.5 text-left text-xs font-medium whitespace-nowrap text-white"
                     >
                       {col.label}
                     </th>
@@ -657,45 +1164,76 @@ export function TestCasesPage() {
                         <span className="font-mono font-semibold text-blue-600">{tc.testCaseId}</span>
                       </Cell>
 
-                      {/* Feature/Module */}
-                      <Cell>{tc.featureModule || '—'}</Cell>
+                      {/* Feature/Module — not editable via the modal; click to expand full text */}
+                      <Cell
+                        expanded={expandedRows.has(tc.id)}
+                        onExpand={() => toggleExpand(tc.id)}
+                      >
+                        {tc.featureModule || '—'}
+                      </Cell>
 
-                      {/* Test Scenario */}
-                      <Cell>{tc.testScenario || '—'}</Cell>
+                      {/* Test Scenario — not editable via the modal; click to expand full text */}
+                      <Cell
+                        expanded={expandedRows.has(tc.id)}
+                        onExpand={() => toggleExpand(tc.id)}
+                      >
+                        {tc.testScenario || '—'}
+                      </Cell>
 
-                      {/* Type */}
+                      {/* Type — not editable via the modal, always short, no expand needed */}
                       <Cell>
                         <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${TYPE_COLORS[tc.type] || 'bg-gray-100 text-gray-600'}`}>
                           {tc.type}
                         </span>
                       </Cell>
 
-                      {/* Precondition */}
-                      <Cell>{tc.precondition || '—'}</Cell>
+                      {/* Precondition — not editable via the modal; click to expand full text */}
+                      {!hiddenCols.has('precondition') && (
+                        <Cell
+                          expanded={expandedRows.has(tc.id)}
+                          onExpand={() => toggleExpand(tc.id)}
+                        >
+                          {tc.precondition || '—'}
+                        </Cell>
+                      )}
 
-                      {/* Action Step */}
-                      <Cell>{tc.actionStep || '—'}</Cell>
+                      {/* Action Step — not editable via the modal; click to expand full text */}
+                      <Cell
+                        expanded={expandedRows.has(tc.id)}
+                        onExpand={() => toggleExpand(tc.id)}
+                      >
+                        {tc.actionStep || '—'}
+                      </Cell>
 
-                      {/* Test Data */}
-                      <Cell>{tc.testData || '—'}</Cell>
+                      {/* Test Data — not editable via the modal; click to expand full text */}
+                      {!hiddenCols.has('testData') && (
+                        <Cell
+                          expanded={expandedRows.has(tc.id)}
+                          onExpand={() => toggleExpand(tc.id)}
+                        >
+                          {tc.testData || '—'}
+                        </Cell>
+                      )}
 
-                      {/* Expected Result */}
-                      <Cell>{tc.expectedResult || '—'}</Cell>
+                      {/* Expected Result — not editable via the modal; click to expand full text */}
+                      <Cell
+                        expanded={expandedRows.has(tc.id)}
+                        onExpand={() => toggleExpand(tc.id)}
+                      >
+                        {tc.expectedResult || '—'}
+                      </Cell>
 
-                      {/* Actual Result */}
-                      <Cell>
+                      {/* Actual Result — quick single-field modal */}
+                      <Cell onClick={() => openQuickField(tc, 'actualResult')}>
                         {tc.actualResult ? (
                           tc.actualResult
                         ) : (
-                          <button
-                            onClick={() => startEdit(tc)}
-                            className="text-gray-300 hover:text-blue-500 italic text-xs flex items-center gap-1"
-                          >
+                          <span className="text-gray-300 hover:text-blue-500 italic text-xs flex items-center gap-1">
                             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                             </svg>
                             Tambah
-                          </button>
+                          </span>
                         )}
                       </Cell>
 
@@ -710,34 +1248,54 @@ export function TestCasesPage() {
                         </select>
                       </td>
 
-                      {/* Test Date — default ke createdAt */}
-                      <Cell>
-                        <span className={tc.testDate ? 'text-gray-700' : 'text-gray-400'}>
-                          {effectiveDate}
-                        </span>
-                      </Cell>
+                      {/* Automation Status — quick-edit dropdown */}
+                      <td className="px-2 py-1.5 align-top border-t border-gray-100 whitespace-nowrap">
+                        <select
+                          className={`text-xs px-1.5 py-0.5 rounded font-medium border-0 cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-400 ${AUTO_STATUS_COLORS[tc.automationStatus] || 'bg-gray-100 text-gray-600'}`}
+                          value={tc.automationStatus}
+                          onChange={e => handleQuickStatusChange(tc.id, 'automationStatus', e.target.value)}
+                        >
+                          {AUTOMATION_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      </td>
+
+                      {/* Test Date — default ke createdAt, cuma readable via expand */}
+                      {!hiddenCols.has('testDate') && (
+                        <Cell
+                          expanded={expandedRows.has(tc.id)}
+                          onExpand={() => toggleExpand(tc.id)}
+                        >
+                          <span className={tc.testDate ? 'text-gray-700' : 'text-gray-400'}>
+                            {effectiveDate}
+                          </span>
+                        </Cell>
+                      )}
 
                       {/* Test By */}
-                      <Cell>
-                        {tc.testBy || <span className="text-gray-400">—</span>}
-                      </Cell>
+                      {!hiddenCols.has('testBy') && (
+                        <Cell
+                          expanded={expandedRows.has(tc.id)}
+                          onExpand={() => toggleExpand(tc.id)}
+                        >
+                          {tc.testBy || <span className="text-gray-400">—</span>}
+                        </Cell>
+                      )}
 
-                      {/* Bug Note */}
-                      <Cell>
-                        {tc.bugNote ? (
-                          tc.bugNote
-                        ) : (
-                          <button
-                            onClick={() => startEdit(tc)}
-                            className="text-gray-300 hover:text-blue-500 italic text-xs flex items-center gap-1"
-                          >
-                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                            </svg>
-                            Tambah
-                          </button>
-                        )}
-                      </Cell>
+                      {/* Bug Note — quick single-field modal */}
+                      {!hiddenCols.has('bugNote') && (
+                        <Cell onClick={() => openQuickField(tc, 'bugNote')}>
+                          {tc.bugNote ? (
+                            tc.bugNote
+                          ) : (
+                            <span className="text-gray-300 hover:text-blue-500 italic text-xs flex items-center gap-1">
+                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                              </svg>
+                              Tambah
+                            </span>
+                          )}
+                        </Cell>
+                      )}
 
                       {/* Actions */}
                       <td className="px-2 py-1.5 align-top text-center border-t border-gray-100">
@@ -771,7 +1329,7 @@ export function TestCasesPage() {
         </div>
       )}
 
-      {/* Edit Modal */}
+      {/* Edit Modal — semua field */}
       {editingId && editingTc && (
         <EditModal
           tc={editingTc}
@@ -779,6 +1337,36 @@ export function TestCasesPage() {
           onChange={setEditValues}
           onSave={() => saveEdit(editingId)}
           onCancel={cancelEdit}
+          testers={testers}
+        />
+      )}
+
+      {/* Quick Field Modal — Actual Result / Bug Note aja */}
+      {quickField && (() => {
+        const qfTc = testCases.find(tc => tc.id === quickField.id);
+        if (!qfTc) return null;
+        return (
+          <QuickFieldModal
+            tc={qfTc}
+            label={quickField.field === 'actualResult' ? 'Actual Result' : 'Bug Note'}
+            placeholder={quickField.field === 'actualResult' ? 'Apa yang terjadi saat test dijalankan…' : 'Bug ID, link Jira, catatan…'}
+            value={quickField.value}
+            onChange={v => setQuickField(prev => prev ? { ...prev, value: v } : prev)}
+            onSave={saveQuickField}
+            onCancel={() => setQuickField(null)}
+            saving={quickFieldSaving}
+          />
+        );
+      })()}
+
+      {/* Add Test Case Modal */}
+      {showAddModal && (
+        <AddTestCaseModal
+          values={addValues}
+          onChange={setAddValues}
+          onSave={handleAddTestCase}
+          onCancel={() => setShowAddModal(false)}
+          saving={addSaving}
         />
       )}
 

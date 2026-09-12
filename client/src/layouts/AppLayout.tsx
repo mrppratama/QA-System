@@ -70,7 +70,27 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 export function AppLayout() {
-  const { session, signOut } = useAuth();
+  const { session, signOut, updateDisplayName } = useAuth();
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState('');
+  const [savingName, setSavingName] = useState(false);
+  const displayName = (session?.user.user_metadata?.full_name as string | undefined) || '';
+
+  const startEditName = () => {
+    setNameInput(displayName);
+    setEditingName(true);
+  };
+
+  const saveName = async () => {
+    setSavingName(true);
+    const { error } = await updateDisplayName(nameInput.trim());
+    setSavingName(false);
+    if (error) {
+      show('error', 'Failed to update name', error);
+    } else {
+      setEditingName(false);
+    }
+  };
 
   const [projects, setProjects]               = useState<Project[]>([]);
   const [projectsLoaded, setProjectsLoaded]   = useState(false);
@@ -279,7 +299,49 @@ export function AppLayout() {
 
           {/* Account / sign out */}
           <div className="px-3 py-3 border-t border-white/10 flex-shrink-0">
-            <p className="text-[11px] text-white/40 truncate mb-1.5">{session?.user.email}</p>
+            {editingName ? (
+              <div className="mb-2 space-y-1.5">
+                <input
+                  autoFocus
+                  value={nameInput}
+                  onChange={e => setNameInput(e.target.value)}
+                  placeholder="Nama kamu"
+                  className="w-full bg-white/5 border border-white/10 text-white text-xs rounded-lg px-2 py-1.5
+                             focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={saveName}
+                    disabled={savingName}
+                    className="flex-1 text-[11px] font-medium bg-blue-600 hover:bg-blue-700 text-white rounded py-1 disabled:opacity-50"
+                  >
+                    {savingName ? 'Saving...' : 'Save'}
+                  </button>
+                  <button
+                    onClick={() => setEditingName(false)}
+                    className="flex-1 text-[11px] text-white/60 hover:text-white border border-white/10 rounded py-1"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-1 mb-1.5">
+                <div className="min-w-0">
+                  <p className="text-xs text-white/80 truncate font-medium">{displayName || session?.user.email}</p>
+                  {displayName && <p className="text-[10px] text-white/30 truncate">{session?.user.email}</p>}
+                </div>
+                <button
+                  onClick={startEditName}
+                  className="flex-shrink-0 text-white/30 hover:text-white/70 p-1"
+                  title="Edit nama"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                </button>
+              </div>
+            )}
             <button
               onClick={() => signOut()}
               className="w-full text-xs text-white/60 hover:text-white border border-white/10

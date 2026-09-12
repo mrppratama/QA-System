@@ -7,6 +7,7 @@ import excelRoutes from './routes/excel';
 import projectRoutes from './routes/projects';
 import testCasesRoutes from './routes/test-cases';
 import automationRoutes from './routes/automation';
+import usersRoutes from './routes/users';
 import { requireAuth } from './middleware/auth';
 
 const app = express();
@@ -35,6 +36,7 @@ app.use('/api/excel', excelRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/test-cases', testCasesRoutes);
 app.use('/api/automation', automationRoutes);
+app.use('/api/users', usersRoutes);
 
 // Global error handler
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

@@ -41,6 +41,11 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  // === USERS ===
+  async getUsers(): Promise<{ success: boolean; users: { id: string; email: string; name?: string }[] }> {
+    return request('/users');
+  },
+
   // === AI ===
   async generateTestCases(input: GenerateInput): Promise<GenerateResponse> {
     return request<GenerateResponse>('/ai/generate-test-cases', {
@@ -115,6 +120,7 @@ export const api = {
       type?: string;
       testingResult?: string;
       automationStatus?: string;
+      testBy?: string;
       page?: number;
       limit?: number;
     },
@@ -131,11 +137,16 @@ export const api = {
     if (params?.type) q.set('type', params.type);
     if (params?.testingResult) q.set('testingResult', params.testingResult);
     if (params?.automationStatus) q.set('automationStatus', params.automationStatus);
+    if (params?.testBy) q.set('testBy', params.testBy);
     if (params?.page) q.set('page', String(params.page));
     if (params?.limit) q.set('limit', String(params.limit));
 
     const qs = q.toString() ? `?${q.toString()}` : '';
     return request(`/projects/${projectId}/test-cases${qs}`, { signal });
+  },
+
+  async getProjectTesters(projectId: string): Promise<{ success: boolean; testers: string[] }> {
+    return request(`/projects/${projectId}/testers`);
   },
 
   async saveTestCases(
