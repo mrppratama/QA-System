@@ -13,15 +13,29 @@ const excelService = new ExcelService();
 
 // Helper to get Excel file Buffer from Supabase Storage or Local Disk
 async function getFileBuffer(fileRecord: { storedName: string; path: string }): Promise<Buffer | null> {
+  // 1. Try Supabase Storage SDK download
   if (supabase) {
-    const { data, error } = await supabase.storage.from(BUCKET_NAME).download(fileRecord.storedName);
-    if (data && !error) {
-      const arrayBuffer = await data.arrayBuffer();
-      return Buffer.from(arrayBuffer);
-    }
+    try {
+      const { data, error } = await supabase.storage.from(BUCKET_NAME).download(fileRecord.storedName);
+      if (data && !error) {
+        const arrayBuffer = await data.arrayBuffer();
+        return Buffer.from(arrayBuffer);
+      }
+    } catch { /* ignore */ }
   }
 
-  // Fallback to local disk if available
+  // 2. Try Supabase Storage Public URL fetch
+  try {
+    const supabaseUrl = process.env.SUPABASE_URL || 'https://qgnhykmemphamepbrmmh.supabase.co';
+    const publicUrl = `${supabaseUrl}/storage/v1/object/public/${BUCKET_NAME}/${fileRecord.storedName}`;
+    const res = await fetch(publicUrl);
+    if (res.ok) {
+      const arrayBuffer = await res.arrayBuffer();
+      return Buffer.from(arrayBuffer);
+    }
+  } catch { /* ignore */ }
+
+  // 3. Fallback to local disk if available
   if (fs.existsSync(fileRecord.path)) {
     return fs.readFileSync(fileRecord.path);
   }
