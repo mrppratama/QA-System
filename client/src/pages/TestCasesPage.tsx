@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { TestCase, Project } from '../types';
 import { TESTING_RESULTS, AUTOMATION_STATUSES, TEST_CASE_TYPES } from '../types';
 import { api } from '../services/api';
@@ -297,6 +297,7 @@ export function TestCasesPage({ activeProject, onToast, onNavigateToGenerate }: 
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [filterType, setFilterType] = useState('');
   const [filterResult, setFilterResult] = useState('');
   const [filterAutoStatus, setFilterAutoStatus] = useState('');
@@ -307,29 +308,42 @@ export function TestCasesPage({ activeProject, onToast, onNavigateToGenerate }: 
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
+  // Debounce search input — avoid firing 1 API request per keystroke
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 400);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const inFlightRef = useRef<AbortController | null>(null);
+
   const loadTestCases = useCallback(async () => {
     if (!activeProject) return;
+    inFlightRef.current?.abort();
+    const controller = new AbortController();
+    inFlightRef.current = controller;
     setLoading(true);
     try {
       const res = await api.getProjectTestCases(activeProject.id, {
-        search: search || undefined,
+        search: debouncedSearch || undefined,
         type: filterType || undefined,
         testingResult: filterResult || undefined,
         automationStatus: filterAutoStatus || undefined,
         limit: 200,
-      });
+      }, controller.signal);
       setTestCases(res.testCases);
       setTotal(res.total);
       setSelectedIds(new Set());
     } catch (err) {
+      if ((err as Error).name === 'AbortError') return;
       onToast('error', 'Failed to load test cases', (err as Error).message);
     } finally {
-      setLoading(false);
+      if (inFlightRef.current === controller) setLoading(false);
     }
-  }, [activeProject, search, filterType, filterResult, filterAutoStatus, onToast]);
+  }, [activeProject, debouncedSearch, filterType, filterResult, filterAutoStatus, onToast]);
 
   useEffect(() => {
     loadTestCases();
+    return () => inFlightRef.current?.abort();
   }, [loadTestCases]);
 
   const allSelected = testCases.length > 0 && selectedIds.size === testCases.length;

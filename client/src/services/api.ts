@@ -117,7 +117,8 @@ export const api = {
       automationStatus?: string;
       page?: number;
       limit?: number;
-    }
+    },
+    signal?: AbortSignal
   ): Promise<{
     success: boolean;
     testCases: TestCase[];
@@ -134,7 +135,7 @@ export const api = {
     if (params?.limit) q.set('limit', String(params.limit));
 
     const qs = q.toString() ? `?${q.toString()}` : '';
-    return request(`/projects/${projectId}/test-cases${qs}`);
+    return request(`/projects/${projectId}/test-cases${qs}`, { signal });
   },
 
   async saveTestCases(

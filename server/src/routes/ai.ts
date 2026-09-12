@@ -2,10 +2,11 @@ import { Router, Request, Response } from 'express';
 import { createAIProvider } from '../services/ai';
 import { GenerateInputSchema, GenerateResultSchema } from '../validators/testcase.validator';
 import { prisma } from '../lib/prisma';
+import { aiRateLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
 
-router.post('/generate-test-cases', async (req: Request, res: Response) => {
+router.post('/generate-test-cases', aiRateLimiter, async (req: Request, res: Response) => {
   try {
     // Validate input
     const parseResult = GenerateInputSchema.safeParse(req.body);

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { z } from 'zod';
+import { aiRateLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
 
@@ -37,7 +38,7 @@ const GenerateAutomationSchema = z.object({
   testCaseIds: z.array(z.string()).optional(),
 });
 
-router.post('/generate', async (req: Request, res: Response) => {
+router.post('/generate', aiRateLimiter, async (req: Request, res: Response) => {
   try {
     const parseResult = GenerateAutomationSchema.safeParse(req.body);
     if (!parseResult.success) {
