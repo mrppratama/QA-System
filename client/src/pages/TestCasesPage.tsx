@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { TestCase, Project } from '../types';
+import { useNavigate } from 'react-router-dom';
+import type { TestCase } from '../types';
 import { TESTING_RESULTS, AUTOMATION_STATUSES, TEST_CASE_TYPES } from '../types';
 import { api } from '../services/api';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { useProjectScopeContext } from '../hooks/useAppShellContext';
 
 // ── Edit Modal ────────────────────────────────────────────────────────────────
 interface EditModalProps {
@@ -285,13 +287,10 @@ function Cell({ children, className = '' }: { children: React.ReactNode; classNa
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────────
-interface TestCasesPageProps {
-  activeProject: Project | null;
-  onToast: (type: 'success' | 'error' | 'info', title: string, msg?: string) => void;
-  onNavigateToGenerate: () => void;
-}
+export function TestCasesPage() {
+  const { activeProject, onToast } = useProjectScopeContext();
+  const navigate = useNavigate();
 
-export function TestCasesPage({ activeProject, onToast, onNavigateToGenerate }: TestCasesPageProps) {
   const [testCases, setTestCases] = useState<TestCase[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -521,7 +520,7 @@ export function TestCasesPage({ activeProject, onToast, onNavigateToGenerate }: 
             {exporting ? 'Exporting...' : 'Export XLSX'}
           </button>
           <button
-            onClick={onNavigateToGenerate}
+            onClick={() => navigate("../generate")}
             className="btn-primary text-xs flex items-center gap-1.5"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -597,7 +596,7 @@ export function TestCasesPage({ activeProject, onToast, onNavigateToGenerate }: 
               : 'Generate test cases to get started'}
           </p>
           {!search && !filterType && !filterResult && !filterAutoStatus && (
-            <button onClick={onNavigateToGenerate} className="mt-4 btn-primary text-sm">
+            <button onClick={() => navigate("../generate")} className="mt-4 btn-primary text-sm">
               Generate Test Cases
             </button>
           )}

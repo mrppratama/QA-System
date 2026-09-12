@@ -1,25 +1,18 @@
 import React, { useState, useCallback } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { GenerateForm } from '../components/GenerateForm';
 import { GeneratingProgress } from '../components/GeneratingProgress';
 import { TestCaseTable } from '../components/TestCaseTable';
 import { api } from '../services/api';
-import type { GeneratedTestCase, GenerateInput, Project } from '../types';
+import { useProjectScopeContext } from '../hooks/useAppShellContext';
+import type { GeneratedTestCase, GenerateInput } from '../types';
 
-interface GeneratePageProps {
-  projects: Project[];
-  activeProjectId: string;
-  onCreateProject: () => void;
-  onToast: (type: 'success' | 'error' | 'info' | 'warning', title: string, msg?: string) => void;
-  onNavigateToTestCases: () => void;
-}
+export function GeneratePage() {
+  const { projects, onCreateProject, onToast } = useProjectScopeContext();
+  const { projectId: routeProjectId } = useParams<{ projectId: string }>();
+  const activeProjectId = routeProjectId!;
+  const navigate = useNavigate();
 
-export function GeneratePage({
-  projects,
-  activeProjectId,
-  onCreateProject,
-  onToast,
-  onNavigateToTestCases,
-}: GeneratePageProps) {
   const [generating, setGenerating] = useState(false);
   const [testCases, setTestCases] = useState<GeneratedTestCase[]>([]);
   const [hasGenerated, setHasGenerated] = useState(false);
@@ -27,6 +20,7 @@ export function GeneratePage({
   const [lastInput, setLastInput] = useState<GenerateInput | null>(null);
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [savedProjectId, setSavedProjectId] = useState<string | null>(null);
 
   const handleGenerate = useCallback(async (input: GenerateInput) => {
     setGenerating(true);
@@ -96,6 +90,7 @@ export function GeneratePage({
         })),
       });
 
+      setSavedProjectId(projectId);
       onToast('success', `${res.saved} test case${res.saved !== 1 ? 's' : ''} saved`, 'View in Test Cases page');
     } catch (err) {
       onToast('error', 'Failed to save test cases', (err as Error).message);
@@ -239,7 +234,7 @@ export function GeneratePage({
               </svg>
               After saving, view and manage all test cases in the
               <button
-                onClick={onNavigateToTestCases}
+                onClick={() => navigate(`/projects/${savedProjectId || activeProjectId}/test-cases`)}
                 className="text-blue-600 hover:underline font-medium"
               >
                 Test Cases

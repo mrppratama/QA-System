@@ -1,5 +1,3 @@
-export type Page = 'dashboard' | 'generate' | 'test-cases' | 'automation' | 'projects';
-
 export interface TestCase {
   id: string;          // DB id (UUID)
   testCaseId: string;  // TC001, TC002, etc.

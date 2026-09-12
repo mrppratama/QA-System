@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import type { Project } from '../types';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
+import { useAppShellContext } from '../hooks/useAppShellContext';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 type ProjectStats = Awaited<ReturnType<typeof api.getProjectStats>>;
@@ -156,16 +157,14 @@ const AUTO_COLORS: Record<string, string> = {
 };
 
 // ─── Main Component ─────────────────────────────────────────────────────────
-interface DashboardPageProps {
-  projects: Project[];
-  activeProject: Project | null;
-  onNavigate: (page: 'generate' | 'test-cases' | 'automation') => void;
-}
 
 // sentinel value untuk "semua project"
 const ALL_PROJECTS = '__all__';
 
-export function DashboardPage({ projects, activeProject, onNavigate }: DashboardPageProps) {
+export function DashboardPage() {
+  const { projects, activeProjectId } = useAppShellContext();
+  const navigate = useNavigate();
+
   // default: 'all' — semua project
   const [selectedView, setSelectedView] = useState<string>(ALL_PROJECTS);
 
@@ -175,6 +174,11 @@ export function DashboardPage({ projects, activeProject, onNavigate }: Dashboard
   const [error,   setError]   = useState('');
 
   const isAll = selectedView === ALL_PROJECTS;
+
+  const goTo = (p: 'generate' | 'test-cases' | 'automation') => {
+    const id = !isAll ? selectedView : activeProjectId;
+    if (id) navigate(`/projects/${id}/${p}`);
+  };
 
   const loadProject = useCallback(async (id: string) => {
     setLoading(true); setError(''); setProjectStats(null);
@@ -487,7 +491,7 @@ export function DashboardPage({ projects, activeProject, onNavigate }: Dashboard
               <div className="card p-5">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Recent Test Sets</h3>
-                  <button onClick={() => onNavigate('generate')} className="text-xs text-blue-600 hover:text-blue-800">
+                  <button onClick={() => goTo('generate')} className="text-xs text-blue-600 hover:text-blue-800">
                     + Generate
                   </button>
                 </div>
@@ -495,7 +499,7 @@ export function DashboardPage({ projects, activeProject, onNavigate }: Dashboard
                   <div className="text-center py-6">
                     <p className="text-xs text-gray-400">Belum ada test case yang digenerate</p>
                     <button
-                      onClick={() => onNavigate('generate')}
+                      onClick={() => goTo('generate')}
                       className="mt-3 text-xs text-blue-600 border border-blue-200 px-3 py-1.5 rounded-lg hover:bg-blue-50"
                     >
                       Generate sekarang
@@ -536,21 +540,21 @@ export function DashboardPage({ projects, activeProject, onNavigate }: Dashboard
                 sub: 'Buat test case baru dengan AI',
                 color: 'text-blue-600 border-blue-200 hover:bg-blue-50',
                 icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>,
-                action: () => onNavigate('generate'),
+                action: () => goTo('generate'),
               },
               {
                 label: 'Lihat Test Cases',
                 sub: 'Review & update hasil testing',
                 color: 'text-gray-600 border-gray-200 hover:bg-gray-50',
                 icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>,
-                action: () => onNavigate('test-cases'),
+                action: () => goTo('test-cases'),
               },
               {
                 label: 'Automation Scripts',
                 sub: 'Generate & kelola scripts',
                 color: 'text-emerald-600 border-emerald-200 hover:bg-emerald-50',
                 icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>,
-                action: () => onNavigate('automation'),
+                action: () => goTo('automation'),
               },
             ].map(item => (
               <button

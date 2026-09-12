@@ -1,13 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import type { AutomationScript, Project, AutomationTool } from '../types';
+import { useNavigate, useParams } from 'react-router-dom';
+import type { AutomationScript, AutomationTool } from '../types';
 import { AUTOMATION_TOOLS } from '../types';
 import { api } from '../services/api';
 import { ConfirmModal } from '../components/ConfirmModal';
-
-interface AutomationPageProps {
-  activeProject: Project | null;
-  onToast: (type: 'success' | 'error' | 'info', title: string, msg?: string) => void;
-}
+import { useProjectScopeContext } from '../hooks/useAppShellContext';
 
 interface FeatureGroup {
   featureModule: string;
@@ -15,8 +12,13 @@ interface FeatureGroup {
   selected: boolean;
 }
 
-export function AutomationPage({ activeProject, onToast }: AutomationPageProps) {
-  const [view, setView] = useState<'list' | 'generate' | 'editor'>('list');
+export function AutomationPage() {
+  const { activeProject, onToast } = useProjectScopeContext();
+  const { scriptId } = useParams<{ scriptId?: string }>();
+  const navigate = useNavigate();
+
+  const [localView, setLocalView] = useState<'list' | 'generate'>('list');
+  const [lastScriptId, setLastScriptId] = useState<string | null>(null);
   const [scripts, setScripts] = useState<AutomationScript[]>([]);
   const [features, setFeatures] = useState<FeatureGroup[]>([]);
   const [selectedTool, setSelectedTool] = useState<AutomationTool>('cypress');
@@ -24,11 +26,26 @@ export function AutomationPage({ activeProject, onToast }: AutomationPageProps) 
   const [scriptDesc, setScriptDesc] = useState('');
   const [generating, setGenerating] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [activeScript, setActiveScript] = useState<AutomationScript | null>(null);
   const [editedScript, setEditedScript] = useState('');
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+
+  const view: 'list' | 'generate' | 'editor' = scriptId ? 'editor' : localView;
+  const activeScript = scriptId ? scripts.find(s => s.id === scriptId) ?? null : null;
+
+  // Resync the editor draft only when the OPEN script actually changes —
+  // not on every `scripts` update (e.g. status change) while editing.
+  useEffect(() => {
+    if (activeScript) setEditedScript(activeScript.script);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeScript?.id]);
+
+  // Keep the "Editor" tab visible when landing directly on an editor URL
+  // (deep link / refresh), not just when opened via a click this session.
+  useEffect(() => {
+    if (scriptId) setLastScriptId(scriptId);
+  }, [scriptId]);
 
   const loadData = useCallback(async () => {
     if (!activeProject) return;
@@ -85,9 +102,8 @@ export function AutomationPage({ activeProject, onToast }: AutomationPageProps) 
         featureModules: selectedFeatures.map(f => f.featureModule),
       });
       setScripts(prev => [res.script, ...prev]);
-      setActiveScript(res.script);
-      setEditedScript(res.script.script);
-      setView('editor');
+      setLastScriptId(res.script.id);
+      navigate(res.script.id);
       onToast('success', 'Script generated!', res.script.name);
     } catch (err) {
       onToast('error', 'Failed to generate script', (err as Error).message);
@@ -102,7 +118,6 @@ export function AutomationPage({ activeProject, onToast }: AutomationPageProps) 
     try {
       const res = await api.updateAutomationScript(activeScript.id, { script: editedScript, name: activeScript.name });
       setScripts(prev => prev.map(s => s.id === activeScript.id ? res.script : s));
-      setActiveScript(res.script);
       onToast('success', 'Script saved');
     } catch (err) {
       onToast('error', 'Failed to save', (err as Error).message);
@@ -137,7 +152,6 @@ export function AutomationPage({ activeProject, onToast }: AutomationPageProps) 
     try {
       const res = await api.updateAutomationScript(id, { status });
       setScripts(prev => prev.map(s => s.id === id ? res.script : s));
-      if (activeScript?.id === id) setActiveScript(res.script);
     } catch (err) {
       onToast('error', 'Failed to update', (err as Error).message);
     }
@@ -149,7 +163,10 @@ export function AutomationPage({ activeProject, onToast }: AutomationPageProps) 
     try {
       await api.deleteAutomationScript(deleteId);
       setScripts(prev => prev.filter(s => s.id !== deleteId));
-      if (activeScript?.id === deleteId) { setActiveScript(null); setView('list'); }
+      if (activeScript?.id === deleteId) {
+        navigate('.');
+        if (lastScriptId === deleteId) setLastScriptId(null);
+      }
       setDeleteId(null);
       onToast('success', 'Script deleted');
     } catch (err) {
@@ -180,10 +197,17 @@ export function AutomationPage({ activeProject, onToast }: AutomationPageProps) 
       {/* Tab nav */}
       <div className="flex items-center gap-4 mb-5 flex-wrap">
         <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
-          {(['list', 'generate', ...(activeScript ? ['editor'] : [])] as const).map(v => (
+          {(['list', 'generate', ...(lastScriptId ? ['editor'] : [])] as const).map(v => (
             <button
               key={v}
-              onClick={() => setView(v as 'list' | 'generate' | 'editor')}
+              onClick={() => {
+                if (v === 'editor') {
+                  if (lastScriptId) navigate(lastScriptId);
+                } else {
+                  if (scriptId) navigate('.');
+                  setLocalView(v as 'list' | 'generate');
+                }
+              }}
               className={`text-xs px-3 py-1.5 rounded-md font-medium transition-colors ${
                 view === v ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
               }`}
@@ -217,7 +241,7 @@ export function AutomationPage({ activeProject, onToast }: AutomationPageProps) 
               </svg>
               <p className="text-sm font-medium text-gray-500">Belum ada automation script</p>
               <p className="text-xs mt-1">Pilih feature lalu generate script automation</p>
-              <button onClick={() => setView('generate')} className="mt-4 btn-primary text-sm">
+              <button onClick={() => setLocalView('generate')} className="mt-4 btn-primary text-sm">
                 Generate Script
               </button>
             </div>
@@ -258,7 +282,7 @@ export function AutomationPage({ activeProject, onToast }: AutomationPageProps) 
                         </button>
                       )}
                       <button
-                        onClick={() => { setActiveScript(script); setEditedScript(script.script); setView('editor'); }}
+                        onClick={() => { setLastScriptId(script.id); navigate(script.id); }}
                         className="text-xs px-2 py-1 border border-gray-200 text-gray-700 rounded hover:bg-gray-50"
                       >
                         Buka Editor
@@ -521,6 +545,20 @@ export function AutomationPage({ activeProject, onToast }: AutomationPageProps) 
             spellCheck={false}
           />
         </div>
+        </div>
+      )}
+
+      {/* ── EDITOR VIEW: script not found (deleted, or bad URL) ── */}
+      {view === 'editor' && !activeScript && !loading && (
+        <div className="card p-12 flex flex-col items-center text-center text-gray-400">
+          <svg className="w-12 h-12 mb-3 text-gray-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+          <p className="text-sm font-medium text-gray-500">Script not found</p>
+          <p className="text-xs mt-1">It may have been deleted.</p>
+          <button onClick={() => navigate('.')} className="mt-4 btn-secondary text-sm">
+            Back to list
+          </button>
         </div>
       )}
 

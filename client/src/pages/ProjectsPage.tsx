@@ -2,22 +2,11 @@ import React, { useState } from 'react';
 import type { Project } from '../types';
 import { api } from '../services/api';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { useAppShellContext } from '../hooks/useAppShellContext';
 
-interface ProjectsPageProps {
-  projects: Project[];
-  activeProjectId: string;
-  onProjectsChange: (projects: Project[]) => void;
-  onActiveProjectChange: (id: string) => void;
-  onToast: (type: 'success' | 'error' | 'info', title: string, msg?: string) => void;
-}
+export function ProjectsPage() {
+  const { projects, activeProjectId, onProjectsChange, onActiveProjectChange, onToast } = useAppShellContext();
 
-export function ProjectsPage({
-  projects,
-  activeProjectId,
-  onProjectsChange,
-  onActiveProjectChange,
-  onToast,
-}: ProjectsPageProps) {
   const [showCreate, setShowCreate] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
