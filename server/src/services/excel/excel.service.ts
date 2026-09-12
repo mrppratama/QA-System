@@ -84,7 +84,7 @@ export class ExcelService {
 
   async readWorkbookFromBuffer(buffer: Buffer): Promise<SheetInfo[]> {
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer);
+    await workbook.xlsx.load(buffer as any);
     return this.extractSheetsFromWorkbook(workbook);
   }
 
