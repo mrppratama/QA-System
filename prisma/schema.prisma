@@ -11,6 +11,7 @@ datasource db {
 model Project {
   id          String   @id @default(cuid())
   name        String
+  slug        String   @unique
   description String?
   projectUrl  String?
   createdAt   DateTime @default(now())

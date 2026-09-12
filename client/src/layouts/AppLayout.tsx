@@ -80,16 +80,17 @@ export function AppLayout() {
 
   const { toasts, dismiss, show } = useToast();
 
-  const projectMatch = useMatch('/projects/:projectId/*');
-  const routedProjectId = projectMatch?.params.projectId;
-  const needsProject = !!routedProjectId;
-  const linkProjectId = routedProjectId || activeProjectId;
+  const projectMatch = useMatch('/projects/:slug/*');
+  const routedSlug = projectMatch?.params.slug;
+  const needsProject = !!routedSlug;
+  const activeProjectSlug = projects.find(p => p.id === activeProjectId)?.slug;
+  const linkSlug = routedSlug || activeProjectSlug;
 
   const matchDashboard  = useMatch({ path: '/dashboard', end: true });
   const matchProjects   = useMatch({ path: '/projects', end: true });
-  const matchGenerate   = useMatch('/projects/:projectId/generate');
-  const matchTestCases  = useMatch('/projects/:projectId/test-cases');
-  const matchAutomation = useMatch('/projects/:projectId/automation/*');
+  const matchGenerate   = useMatch('/projects/:slug/generate');
+  const matchTestCases  = useMatch('/projects/:slug/test-cases');
+  const matchAutomation = useMatch('/projects/:slug/automation/*');
 
   const currentLabel =
     matchDashboard ? 'Dashboard' :
@@ -112,7 +113,7 @@ export function AppLayout() {
 
   const navigate = useNavigate();
 
-  const activeProjectForHeader = projects.find(p => p.id === routedProjectId) || null;
+  const activeProjectForHeader = projects.find(p => p.slug === routedSlug) || null;
 
   // Load projects (App's auth gate already guarantees we're authenticated by the time this mounts)
   useEffect(() => {
@@ -142,7 +143,7 @@ export function AppLayout() {
     setProjects(prev => [res.project, ...prev]);
     handleActiveProjectChange(res.project.id);
     if (currentProjectSegment) {
-      navigate(`/projects/${res.project.id}/${currentProjectSegment}`);
+      navigate(`/projects/${res.project.slug}/${currentProjectSegment}`);
     }
     show('success', 'Project created', name);
   }, [show, handleActiveProjectChange, currentProjectSegment, navigate]);
@@ -159,7 +160,7 @@ export function AppLayout() {
 
   const hrefFor = (item: NavItem): string | null => {
     if (!item.projectScoped) return `/${item.id}`;
-    return linkProjectId ? `/projects/${linkProjectId}/${item.id}` : null;
+    return linkSlug ? `/projects/${linkSlug}/${item.id}` : null;
   };
 
   return (
@@ -248,7 +249,10 @@ export function AppLayout() {
               <div className="relative">
                 <select
                   value={activeProjectId}
-                  onChange={e => navigate(`/projects/${e.target.value}/${currentProjectSegment || 'test-cases'}`)}
+                  onChange={e => {
+                    const proj = projects.find(p => p.id === e.target.value);
+                    if (proj) navigate(`/projects/${proj.slug}/${currentProjectSegment || 'test-cases'}`);
+                  }}
                   className="w-full appearance-none bg-white/5 border border-white/10 text-white text-xs rounded-lg px-3 py-2 pr-7
                              focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500
                              cursor-pointer"

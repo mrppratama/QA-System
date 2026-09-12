@@ -177,7 +177,8 @@ export function DashboardPage() {
 
   const goTo = (p: 'generate' | 'test-cases' | 'automation') => {
     const id = !isAll ? selectedView : activeProjectId;
-    if (id) navigate(`/projects/${id}/${p}`);
+    const proj = projects.find(pr => pr.id === id);
+    if (proj) navigate(`/projects/${proj.slug}/${p}`);
   };
 
   const loadProject = useCallback(async (id: string) => {

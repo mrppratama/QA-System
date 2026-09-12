@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { GenerateForm } from '../components/GenerateForm';
 import { GeneratingProgress } from '../components/GeneratingProgress';
 import { TestCaseTable } from '../components/TestCaseTable';
@@ -8,9 +8,8 @@ import { useProjectScopeContext } from '../hooks/useAppShellContext';
 import type { GeneratedTestCase, GenerateInput } from '../types';
 
 export function GeneratePage() {
-  const { projects, onCreateProject, onToast } = useProjectScopeContext();
-  const { projectId: routeProjectId } = useParams<{ projectId: string }>();
-  const activeProjectId = routeProjectId!;
+  const { projects, activeProject: routeProject, onCreateProject, onToast } = useProjectScopeContext();
+  const activeProjectId = routeProject.id;
   const navigate = useNavigate();
 
   const [generating, setGenerating] = useState(false);
@@ -234,7 +233,10 @@ export function GeneratePage() {
               </svg>
               After saving, view and manage all test cases in the
               <button
-                onClick={() => navigate(`/projects/${savedProjectId || activeProjectId}/test-cases`)}
+                onClick={() => {
+                  const proj = projects.find(p => p.id === (savedProjectId || activeProjectId));
+                  if (proj) navigate(`/projects/${proj.slug}/test-cases`);
+                }}
                 className="text-blue-600 hover:underline font-medium"
               >
                 Test Cases

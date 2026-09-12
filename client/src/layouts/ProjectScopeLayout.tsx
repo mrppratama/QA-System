@@ -5,10 +5,10 @@ import type { ProjectScopeContext } from './appShellTypes';
 
 export function ProjectScopeLayout() {
   const ctx = useAppShellContext();
-  const { projectId } = useParams<{ projectId: string }>();
+  const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
 
-  const project = ctx.projects.find(p => p.id === projectId) ?? null;
+  const project = ctx.projects.find(p => p.slug === slug) ?? null;
 
   useEffect(() => {
     if (!ctx.projectsLoaded) return; // still loading — don't judge "not found" yet
@@ -23,7 +23,7 @@ export function ProjectScopeLayout() {
       ctx.onActiveProjectChange(project.id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ctx.projectsLoaded, ctx.projects, projectId]);
+  }, [ctx.projectsLoaded, ctx.projects, slug]);
 
   if (!ctx.projectsLoaded) {
     return (

@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import { slugify } from '../lib/slug';
 import { z } from 'zod';
 
 const router = Router();
@@ -38,7 +39,14 @@ router.post('/', async (req: Request, res: Response) => {
     if (!parseResult.success) {
       return res.status(400).json({ success: false, error: 'Invalid input' });
     }
-    const project = await prisma.project.create({ data: parseResult.data });
+    const base = slugify(parseResult.data.name);
+    let slug = base;
+    let suffix = 2;
+    while (await prisma.project.findUnique({ where: { slug } })) {
+      slug = `${base}-${suffix++}`;
+    }
+
+    const project = await prisma.project.create({ data: { ...parseResult.data, slug } });
     return res.json({ success: true, project });
   } catch (err) {
     return res.status(500).json({ success: false, error: (err as Error).message });

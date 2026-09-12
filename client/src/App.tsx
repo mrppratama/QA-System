@@ -31,7 +31,7 @@ export default function App() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/projects" element={<ProjectsPage />} />
 
-        <Route path="/projects/:projectId" element={<ProjectScopeLayout />}>
+        <Route path="/projects/:slug" element={<ProjectScopeLayout />}>
           <Route index element={<Navigate to="test-cases" replace />} />
           <Route path="generate" element={<GeneratePage />} />
           <Route path="test-cases" element={<TestCasesPage />} />
