@@ -1,12 +1,5 @@
 import multer from 'multer';
 import path from 'path';
-import fs from 'fs';
-import crypto from 'crypto';
-
-const uploadsDir = path.resolve(process.cwd(), '../uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
 
 const storage = multer.memoryStorage();
 

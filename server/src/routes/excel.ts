@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
 import path from 'path';
-import fs from 'fs';
 import crypto from 'crypto';
 import { upload } from '../middleware/upload';
 import { ExcelService } from '../services/excel/excel.service';
@@ -11,9 +10,8 @@ import { z } from 'zod';
 const router = Router();
 const excelService = new ExcelService();
 
-// Helper to get Excel file Buffer from Supabase Storage or Local Disk
-async function getFileBuffer(fileRecord: { storedName: string; path: string }): Promise<Buffer | null> {
-  // 1. Try Supabase Storage SDK download
+// Download Excel file Buffer from Supabase Storage
+async function getFileBuffer(fileRecord: { storedName: string }): Promise<Buffer | null> {
   if (supabase) {
     try {
       const { data, error } = await supabase.storage.from(BUCKET_NAME).download(fileRecord.storedName);
@@ -24,7 +22,6 @@ async function getFileBuffer(fileRecord: { storedName: string; path: string }): 
     } catch { /* ignore */ }
   }
 
-  // 2. Try Supabase Storage Public URL fetch
   try {
     const supabaseUrl = process.env.SUPABASE_URL || 'https://qgnhykmemphamepbrmmh.supabase.co';
     const publicUrl = `${supabaseUrl}/storage/v1/object/public/${BUCKET_NAME}/${fileRecord.storedName}`;
@@ -34,11 +31,6 @@ async function getFileBuffer(fileRecord: { storedName: string; path: string }): 
       return Buffer.from(arrayBuffer);
     }
   } catch { /* ignore */ }
-
-  // 3. Fallback to local disk if available
-  if (fs.existsSync(fileRecord.path)) {
-    return fs.readFileSync(fileRecord.path);
-  }
 
   return null;
 }
@@ -56,10 +48,8 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
     const ext = path.extname(req.file.originalname).toLowerCase() || '.xlsx';
     const random = crypto.randomBytes(8).toString('hex');
     const storedName = `upload-${Date.now()}-${random}${ext}`;
-    const localUploadPath = path.resolve(process.cwd(), '../uploads', storedName);
 
-    // Try uploading to Supabase Storage if configured
-    let filePath = localUploadPath;
+    let storageOk = false;
     if (supabase) {
       try {
         const { error } = await supabase.storage.from(BUCKET_NAME).upload(storedName, fileBuffer, {
@@ -69,26 +59,25 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
         if (error) {
           console.warn('[Supabase Storage Upload Warning]', error.message);
         } else {
-          filePath = storedName;
+          storageOk = true;
         }
       } catch (err) {
         console.warn('[Supabase Storage Exception]', err);
       }
     }
 
-    // Save local backup if filesystem is writable
-    try {
-      const uploadsDir = path.resolve(process.cwd(), '../uploads');
-      if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-      fs.writeFileSync(localUploadPath, fileBuffer);
-    } catch { /* ignore ephemeral fs errors */ }
+    if (!storageOk) {
+      return res.status(500).json({
+        success: false,
+        error: 'Storage unavailable. Supabase Storage is required.',
+      });
+    }
 
-    // Save file info to DB
     const excelFile = await prisma.excelFile.create({
       data: {
         originalName: req.file.originalname,
         storedName,
-        path: filePath,
+        path: storedName,
         sheets: JSON.stringify(sheets.map(s => s.name)),
       },
     });
@@ -198,22 +187,14 @@ router.post('/:id/add-test-cases', async (req: Request, res: Response) => {
 
     const { sheetName, testCases, columnMapping } = parseResult.data;
 
-    let tempFilePath = file.path;
-    const isLocal = fs.existsSync(file.path);
-
-    if (!isLocal) {
-      const buffer = await getFileBuffer(file);
-      if (!buffer) {
-        return res.status(404).json({ success: false, error: 'File no longer exists or could not be downloaded' });
-      }
-      tempFilePath = path.resolve(process.cwd(), '../uploads', `temp-${Date.now()}-${file.storedName}`);
-      fs.writeFileSync(tempFilePath, buffer);
+    const fileBuffer = await getFileBuffer(file);
+    if (!fileBuffer) {
+      return res.status(404).json({ success: false, error: 'File no longer exists or could not be downloaded' });
     }
 
-    // Auto-detect mapping if not provided
     let mapping = columnMapping || {};
     if (Object.keys(mapping).length === 0) {
-      const sheets = await excelService.readWorkbook(tempFilePath);
+      const sheets = await excelService.readWorkbook(fileBuffer, file.storedName);
       const sheet = sheets.find(s => s.name === sheetName);
       if (sheet) {
         mapping = excelService.detectColumnMapping(sheet.headers) as Record<string, string>;
@@ -221,7 +202,7 @@ router.post('/:id/add-test-cases', async (req: Request, res: Response) => {
     }
 
     const result = await excelService.addTestCasesToSheet(
-      tempFilePath,
+      fileBuffer,
       sheetName,
       testCases.map(tc => ({
         id: tc.id,
@@ -241,21 +222,15 @@ router.post('/:id/add-test-cases', async (req: Request, res: Response) => {
       mapping
     );
 
-    // If modified, re-upload to Supabase Storage
     if (supabase) {
       try {
-        const updatedBuffer = fs.readFileSync(tempFilePath);
-        await supabase.storage.from(BUCKET_NAME).upload(file.storedName, updatedBuffer, {
+        await supabase.storage.from(BUCKET_NAME).upload(file.storedName, result.buffer, {
           contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           upsert: true,
         });
       } catch (err) {
         console.warn('[Supabase Re-upload Error]', err);
       }
-    }
-
-    if (!isLocal) {
-      try { fs.unlinkSync(tempFilePath); } catch {}
     }
 
     return res.json({

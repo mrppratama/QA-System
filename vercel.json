@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "framework": "vite",
+  "installCommand": "npm install && npm --prefix server install && npm --prefix server run db:generate && npm --prefix server run build && npm --prefix client install",
+  "buildCommand": "npm --prefix client run build",
+  "outputDirectory": "client/dist",
+  "functions": {
+    "api/**/*.ts": {
+      "maxDuration": 60,
+      "memory": 1024
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "/api/index.ts"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/"
+    }
+  ]
+}

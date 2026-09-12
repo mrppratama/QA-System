@@ -1,6 +1,4 @@
 import ExcelJS from 'exceljs';
-import path from 'path';
-import fs from 'fs';
 
 export interface SheetInfo {
   name: string;
@@ -59,26 +57,9 @@ function sanitizeCellValue(value: string | undefined | null): string {
 }
 
 export class ExcelService {
-  private uploadsDir: string;
-  private exportsDir: string;
-
-  constructor() {
-    this.uploadsDir = path.resolve(process.cwd(), '../uploads');
-    this.exportsDir = path.resolve(process.cwd(), '../exports');
-    this.ensureDirs();
-  }
-
-  private ensureDirs() {
-    [this.uploadsDir, this.exportsDir].forEach(dir => {
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-    });
-  }
-
-  async readWorkbook(filePath: string): Promise<SheetInfo[]> {
+  async readWorkbook(buffer: Buffer, _filename?: string): Promise<SheetInfo[]> {
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(filePath);
+    await workbook.xlsx.load(buffer as any);
     return this.extractSheetsFromWorkbook(workbook);
   }
 
@@ -159,13 +140,13 @@ export class ExcelService {
   }
 
   async addTestCasesToSheet(
-    filePath: string,
+    buffer: Buffer,
     sheetName: string,
     testCases: TestCaseRow[],
     columnMapping: ColumnMapping
-  ): Promise<{ added: number; lastId: string }> {
+  ): Promise<{ added: number; lastId: string; buffer: Buffer }> {
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(filePath);
+    await workbook.xlsx.load(buffer as any);
 
     const ws = workbook.getWorksheet(sheetName);
     if (!ws) {
@@ -277,75 +258,12 @@ export class ExcelService {
       added++;
     }
 
-    await workbook.xlsx.writeFile(filePath);
-
+    const arrayBuffer = await workbook.xlsx.writeBuffer();
     return {
       added,
       lastId: `TC${String(lastTcNumber).padStart(3, '0')}`,
+      buffer: Buffer.from(arrayBuffer),
     };
-  }
-
-  async createNewWorkbook(testCases: TestCaseRow[], filename: string): Promise<string> {
-    const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'QA Test Case Generator';
-    workbook.created = new Date();
-
-    const ws = workbook.addWorksheet('Test Cases');
-
-    // Define columns
-    ws.columns = [
-      { header: 'Test Case ID', key: 'testCaseId', width: 15 },
-      { header: 'Feature/Module', key: 'featureModule', width: 20 },
-      { header: 'Test Scenario', key: 'testScenario', width: 40 },
-      { header: 'Type', key: 'type', width: 15 },
-      { header: 'Precondition', key: 'precondition', width: 30 },
-      { header: 'Action Step', key: 'actionStep', width: 40 },
-      { header: 'Test Data', key: 'testData', width: 20 },
-      { header: 'Expected Result', key: 'expectedResult', width: 40 },
-      { header: 'Actual Result', key: 'actualResult', width: 30 },
-      { header: 'Testing Result', key: 'testingResult', width: 15 },
-      { header: 'Test Date', key: 'testDate', width: 15 },
-      { header: 'Test By', key: 'testBy', width: 15 },
-      { header: 'Bug Note', key: 'bugNote', width: 30 },
-    ];
-
-    // Style header row
-    const headerRow = ws.getRow(1);
-    headerRow.font = { bold: true };
-    headerRow.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FF1E3A5F' },
-    };
-    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-
-    // Add data
-    testCases.forEach(tc => {
-      ws.addRow({
-        testCaseId: sanitizeCellValue(tc.id),
-        featureModule: sanitizeCellValue(tc.featureModule),
-        testScenario: sanitizeCellValue(tc.testScenario),
-        type: sanitizeCellValue(tc.type),
-        precondition: sanitizeCellValue(tc.precondition),
-        actionStep: sanitizeCellValue(tc.actionStep),
-        testData: sanitizeCellValue(tc.testData),
-        expectedResult: sanitizeCellValue(tc.expectedResult),
-        actualResult: '',
-        testingResult: '',
-        testDate: '',
-        testBy: '',
-        bugNote: '',
-      });
-    });
-
-    // Enable word wrap for step columns
-    ws.getColumn('actionStep').alignment = { wrapText: true, vertical: 'top' };
-    ws.getColumn('expectedResult').alignment = { wrapText: true, vertical: 'top' };
-    ws.getColumn('precondition').alignment = { wrapText: true, vertical: 'top' };
-
-    const exportPath = path.join(this.exportsDir, filename);
-    await workbook.xlsx.writeFile(exportPath);
-    return exportPath;
   }
 
   async createNewWorkbookBuffer(testCases: TestCaseRow[]): Promise<Buffer> {
@@ -403,13 +321,5 @@ export class ExcelService {
 
     const arrayBuffer = await workbook.xlsx.writeBuffer();
     return Buffer.from(arrayBuffer);
-  }
-
-  getUploadPath(filename: string): string {
-    return path.join(this.uploadsDir, filename);
-  }
-
-  getExportPath(filename: string): string {
-    return path.join(this.exportsDir, filename);
   }
 }
