@@ -4,9 +4,11 @@ import { GeneratePage } from './pages/GeneratePage';
 import { TestCasesPage } from './pages/TestCasesPage';
 import { AutomationPage } from './pages/AutomationPage';
 import { ProjectsPage } from './pages/ProjectsPage';
+import { LoginPage } from './pages/LoginPage';
 import { ProjectModal } from './components/ProjectModal';
 import { Toast, useToast } from './components/Toast';
 import { api } from './services/api';
+import { useAuth } from './contexts/AuthContext';
 import type { Page, Project } from './types';
 
 const ACTIVE_PROJECT_KEY = 'qa_active_project_id';
@@ -65,6 +67,8 @@ const NAV_ITEMS: NavItem[] = [
 const PROJECT_PAGES: Page[] = ['generate', 'test-cases', 'automation'];
 
 export default function App() {
+  const { session, loading: authLoading, signOut } = useAuth();
+
   const [page, setPage]                       = useState<Page>('dashboard');
   const [projects, setProjects]               = useState<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string>('');
@@ -73,8 +77,9 @@ export default function App() {
 
   const { toasts, dismiss, show } = useToast();
 
-  // Load projects
+  // Load projects (only once authenticated)
   useEffect(() => {
+    if (!session) return;
     api.getProjects()
       .then(res => {
         setProjects(res.projects);
@@ -84,7 +89,7 @@ export default function App() {
         else if (res.projects.length > 0) setActiveProjectId(res.projects[0].id);
       })
       .catch(() => {});
-  }, []);
+  }, [session]);
 
   const handleActiveProjectChange = useCallback((id: string) => {
     setActiveProjectId(id);
@@ -109,6 +114,18 @@ export default function App() {
     setPage(p);
     setSidebarOpen(false);
   };
+
+  if (authLoading) {
+    return (
+      <div className="h-screen bg-gray-50 flex items-center justify-center text-sm text-gray-400">
+        Loading...
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <LoginPage />;
+  }
 
   return (
     <div className="h-screen bg-gray-50 flex overflow-hidden">
@@ -199,6 +216,18 @@ export default function App() {
               </button>
             </div>
           )}
+
+          {/* Account / sign out */}
+          <div className="px-3 py-3 border-t border-white/10 flex-shrink-0">
+            <p className="text-[11px] text-white/40 truncate mb-1.5">{session.user.email}</p>
+            <button
+              onClick={() => signOut()}
+              className="w-full text-xs text-white/60 hover:text-white border border-white/10
+                         hover:border-white/20 rounded-lg py-1.5 transition-colors"
+            >
+              Sign Out
+            </button>
+          </div>
         </aside>
       </>
 

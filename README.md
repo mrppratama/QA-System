@@ -157,16 +157,41 @@ Bug Note          → Catatan bug
 
 ## Environment Variables
 
+**Server** (`.env` di root — dibaca oleh `server/`):
+
 | Variable | Wajib | Keterangan |
 |----------|-------|------------|
 | `PORT` | | Default: 3001 |
 | `CLIENT_URL` | | Default: http://localhost:5173 |
-| `DATABASE_URL` | ✅ | Absolute path ke file SQLite |
+| `DATABASE_URL` | ✅ | Supabase Postgres, pooler URL (port 6543) |
+| `DIRECT_URL` | ✅ | Supabase Postgres, direct URL (port 5432), untuk migrasi |
+| `SUPABASE_URL` | ✅ | Untuk Storage (file Excel) & verifikasi login |
+| `SUPABASE_SERVICE_ROLE_KEY` | ✅ | Dipakai server untuk akses Storage & verifikasi token login |
+| `SUPABASE_ANON_KEY` | | Fallback kalau service role key belum diset |
+| `SUPABASE_STORAGE_BUCKET` | | Default: excel-files |
 | `AI_PROVIDER` | | Default: nine-router |
 | `NINE_ROUTER_BASE_URL` | ✅ | Base URL 9Router API |
 | `NINE_ROUTER_API_KEY` | ✅ | API key 9Router |
 | `NINE_ROUTER_MODEL` | | Default: cc/claude-sonnet-4-6 |
 | `NINE_ROUTER_TIMEOUT` | | Default: 60000 (ms) |
+
+**Client** (`client/.env` — dibaca oleh Vite, wajib prefix `VITE_`):
+
+| Variable | Wajib | Keterangan |
+|----------|-------|------------|
+| `VITE_SUPABASE_URL` | ✅ | Sama dengan `SUPABASE_URL` di server |
+| `VITE_SUPABASE_ANON_KEY` | ✅ | Anon key (aman untuk browser, bukan service role key) |
+
+---
+
+## Authentication (Login)
+
+Login menggunakan **Supabase Auth** (email + password). Semua endpoint `/api/*` (kecuali `/api/health`) butuh session yang valid.
+
+1. Di Supabase Dashboard → **Authentication → Providers**, pastikan **Email** provider aktif.
+2. Tidak ada halaman signup publik — buat akun untuk tiap user secara manual di **Authentication → Users → Add user**.
+3. Set `VITE_SUPABASE_URL` & `VITE_SUPABASE_ANON_KEY` di `client/.env` (lokal) dan di Vercel Environment Variables (production) supaya halaman login bisa jalan.
+4. Semua user yang login melihat data yang sama (Project/TestCase shared, tidak dipisah per-user).
 
 ---
 
@@ -226,4 +251,4 @@ npm run build
 ```
 Output: `client/dist/` dan `server/dist/`
 
-> **Catatan untuk Vercel deployment**: SQLite hanya untuk local dev. Untuk production, ganti ke PostgreSQL (Supabase/Neon/Railway) dan ubah `provider = "sqlite"` → `provider = "postgresql"` di `server/prisma/schema.prisma`.
+> **Catatan untuk Vercel deployment**: database sudah pakai PostgreSQL (Supabase). Pastikan semua environment variables di atas (server & client) sudah diset di Vercel Project Settings sebelum deploy.

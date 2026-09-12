@@ -89,8 +89,20 @@ export function ExcelPanel({ testCases, onToast }: ExcelPanelProps) {
     }
   };
 
-  const handleDownload = () => {
-    window.open(api.getExportUrl(fileId), '_blank');
+  const handleDownload = async () => {
+    try {
+      const blob = await api.downloadExport(fileId);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName || 'export.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      onToast('error', 'Download failed', (err as Error).message);
+    }
   };
 
   const handleReset = () => {

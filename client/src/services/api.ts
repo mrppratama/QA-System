@@ -10,14 +10,23 @@ import type {
   TestCase,
   AutomationScript,
 } from '../types';
+import { supabase } from '../lib/supabase';
 
 const BASE_URL = '/api';
+
+async function authHeaders(): Promise<Record<string, string>> {
+  if (!supabase) return {};
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${url}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      ...(await authHeaders()),
       ...options?.headers,
     },
   });
@@ -216,6 +225,7 @@ export const api = {
 
     const res = await fetch(`${BASE_URL}/excel/import`, {
       method: 'POST',
+      headers: await authHeaders(),
       body: formData,
     });
 
@@ -268,14 +278,21 @@ export const api = {
     });
   },
 
-  getExportUrl(fileId: string): string {
-    return `${BASE_URL}/excel/${fileId}/export`;
+  async downloadExport(fileId: string): Promise<Blob> {
+    const res = await fetch(`${BASE_URL}/excel/${fileId}/export`, {
+      headers: await authHeaders(),
+    });
+    if (!res.ok) {
+      const err = await res.json() as { error?: string };
+      throw new Error(err.error || 'Export failed');
+    }
+    return res.blob();
   },
 
   async exportNew(testCases: TestCase[], filename?: string): Promise<Blob> {
     const res = await fetch(`${BASE_URL}/excel/export-new`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
       body: JSON.stringify({
         testCases: testCases.map(tc => ({
           id: tc.testCaseId,
@@ -307,7 +324,7 @@ export const api = {
   async exportProject(projectId: string): Promise<Blob> {
     const res = await fetch(`${BASE_URL}/excel/export-project/${projectId}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
     });
 
     if (!res.ok) {

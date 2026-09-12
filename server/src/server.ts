@@ -10,6 +10,7 @@ import excelRoutes from './routes/excel';
 import projectRoutes from './routes/projects';
 import testCasesRoutes from './routes/test-cases';
 import automationRoutes from './routes/automation';
+import { requireAuth } from './middleware/auth';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -27,6 +28,9 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+
+// Everything below requires a valid Supabase session (health check above stays public)
+app.use('/api', requireAuth);
 
 // Routes
 app.use('/api/ai', aiRoutes);
