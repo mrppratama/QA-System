@@ -1,9 +1,6 @@
+import './env';
 import express from 'express';
 import cors from 'cors';
-import path from 'path';
-import dotenv from 'dotenv';
-
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 import aiRoutes from './routes/ai';
 import excelRoutes from './routes/excel';

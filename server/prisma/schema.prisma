@@ -34,6 +34,8 @@ model TestCaseSet {
 
   project   Project?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
   testCases TestCase[]
+
+  @@index([projectId])
 }
 
 model TestCase {
@@ -57,6 +59,8 @@ model TestCase {
   updatedAt        DateTime @updatedAt
 
   testCaseSet TestCaseSet @relation(fields: [testCaseSetId], references: [id], onDelete: Cascade)
+
+  @@index([testCaseSetId])
 }
 
 model AutomationScript {
@@ -71,6 +75,8 @@ model AutomationScript {
   updatedAt   DateTime @updatedAt
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
 }
 
 model ExcelFile {
