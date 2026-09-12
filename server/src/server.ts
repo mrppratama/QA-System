@@ -44,7 +44,9 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   });
 });
 
-if (process.env.NODE_ENV !== 'test') {
+// Vercel invokes the exported app as a request handler directly; it never
+// needs (or wants) a bound listener inside the serverless function.
+if (!process.env.VERCEL && process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {
     console.log(`✓ Server running on http://localhost:${PORT}`);
   });

@@ -32,16 +32,27 @@ router.post('/generate-test-cases', async (req: Request, res: Response) => {
     let result;
     let lastError: Error | null = null;
 
-    // Try with 1 retry
+    // Retry only if there's still enough time left in the Vercel function's
+    // maxDuration (see vercel.json) — otherwise a slow/timed-out first attempt
+    // plus a full-length retry would exceed the platform limit and get killed
+    // with an opaque 504 instead of the error handling below.
+    const startedAt = Date.now();
+    const FUNCTION_BUDGET_MS = 55_000; // stay under vercel.json's 60s maxDuration
+    const RETRY_DELAY_MS = 500;
+
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         result = await aiProvider.generateTestCases(input);
         break;
       } catch (err) {
         lastError = err as Error;
-        if (attempt === 0) {
+        const elapsed = Date.now() - startedAt;
+        const canRetry = attempt === 0 && elapsed + RETRY_DELAY_MS < FUNCTION_BUDGET_MS;
+        if (canRetry) {
           console.warn('[AI] First attempt failed, retrying...', err);
-          await new Promise(r => setTimeout(r, 1000));
+          await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+        } else {
+          break;
         }
       }
     }

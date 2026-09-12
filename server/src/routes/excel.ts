@@ -22,15 +22,16 @@ async function getFileBuffer(fileRecord: { storedName: string }): Promise<Buffer
     } catch { /* ignore */ }
   }
 
-  try {
-    const supabaseUrl = process.env.SUPABASE_URL || 'https://qgnhykmemphamepbrmmh.supabase.co';
-    const publicUrl = `${supabaseUrl}/storage/v1/object/public/${BUCKET_NAME}/${fileRecord.storedName}`;
-    const res = await fetch(publicUrl);
-    if (res.ok) {
-      const arrayBuffer = await res.arrayBuffer();
-      return Buffer.from(arrayBuffer);
-    }
-  } catch { /* ignore */ }
+  if (process.env.SUPABASE_URL) {
+    try {
+      const publicUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/${BUCKET_NAME}/${fileRecord.storedName}`;
+      const res = await fetch(publicUrl);
+      if (res.ok) {
+        const arrayBuffer = await res.arrayBuffer();
+        return Buffer.from(arrayBuffer);
+      }
+    } catch { /* ignore */ }
+  }
 
   return null;
 }
