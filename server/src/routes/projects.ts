@@ -279,7 +279,7 @@ router.post('/:id/save-test-cases', async (req: Request, res: Response) => {
 // GET /api/projects/dashboard/stats  —  workspace-wide overview
 router.get('/dashboard/stats', async (_req: Request, res: Response) => {
   try {
-    const [projects, totalScripts, total, resultGroups, autoGroups, featureGroups] = await Promise.all([
+    const [projects, totalScripts, total, resultGroups, autoGroups, featureGroups, typeGroups, testerGroups, attentionCases] = await Promise.all([
       prisma.project.findMany({
         orderBy: { createdAt: 'desc' },
         include: { _count: { select: { testCaseSets: true } } },
@@ -289,6 +289,23 @@ router.get('/dashboard/stats', async (_req: Request, res: Response) => {
       prisma.testCase.groupBy({ by: ['testingResult'], _count: { _all: true } }),
       prisma.testCase.groupBy({ by: ['automationStatus'], _count: { _all: true } }),
       prisma.testCase.groupBy({ by: ['featureModule'] }),
+      prisma.testCase.groupBy({ by: ['type'], _count: { _all: true } }),
+      prisma.testCase.groupBy({
+        by: ['testBy'],
+        where: { testBy: { not: null } },
+        _count: { _all: true },
+        orderBy: { _count: { testBy: 'desc' } },
+      }),
+      prisma.testCase.findMany({
+        where: { testingResult: { in: ['Failed', 'Blocked'] } },
+        orderBy: { updatedAt: 'desc' },
+        take: 10,
+        select: {
+          id: true, testCaseId: true, featureModule: true, testScenario: true,
+          testingResult: true, bugNote: true, testBy: true, testDate: true,
+          testCaseSet: { select: { project: { select: { id: true, name: true } } } },
+        },
+      }),
     ]);
 
     const byResult: Record<string, number> = { 'Not Tested': 0, Passed: 0, Failed: 0, Blocked: 0 };
@@ -296,6 +313,27 @@ router.get('/dashboard/stats', async (_req: Request, res: Response) => {
 
     const byAuto: Record<string, number> = { 'Not Automated': 0, Generated: 0, Automated: 0 };
     for (const g of autoGroups) byAuto[g.automationStatus] = g._count._all;
+
+    const byType: Record<string, number> = {};
+    for (const g of typeGroups) byType[g.type] = g._count._all;
+
+    const byTester = testerGroups
+      .filter(g => g.testBy)
+      .map(g => ({ tester: g.testBy as string, count: g._count._all }))
+      .slice(0, 10);
+
+    const attention = attentionCases.map(tc => ({
+      id: tc.id,
+      testCaseId: tc.testCaseId,
+      featureModule: tc.featureModule,
+      testScenario: tc.testScenario,
+      testingResult: tc.testingResult,
+      bugNote: tc.bugNote,
+      testBy: tc.testBy,
+      testDate: tc.testDate,
+      projectId: tc.testCaseSet.project?.id ?? null,
+      projectName: tc.testCaseSet.project?.name ?? null,
+    }));
 
     const automated = (byAuto['Generated'] || 0) + (byAuto['Automated'] || 0);
 
@@ -310,6 +348,9 @@ router.get('/dashboard/stats', async (_req: Request, res: Response) => {
       },
       byTestingResult: byResult,
       byAutomationStatus: byAuto,
+      byType,
+      byTester,
+      attention,
       projects: projects.map(p => ({ id: p.id, name: p.name, testSets: p._count.testCaseSets })),
     });
   } catch (err) {
@@ -329,11 +370,27 @@ router.get('/:id/stats', async (req: Request, res: Response) => {
 
     const where = { testCaseSet: { projectId } };
 
-    const [total, resultGroups, autoGroups, featureGroups, recentSets] = await Promise.all([
+    const [total, resultGroups, autoGroups, featureGroups, typeGroups, testerGroups, attentionCases, recentSets] = await Promise.all([
       prisma.testCase.count({ where }),
       prisma.testCase.groupBy({ by: ['testingResult'], where, _count: { _all: true } }),
       prisma.testCase.groupBy({ by: ['automationStatus'], where, _count: { _all: true } }),
       prisma.testCase.groupBy({ by: ['featureModule'], where, _count: { _all: true } }),
+      prisma.testCase.groupBy({ by: ['type'], where, _count: { _all: true } }),
+      prisma.testCase.groupBy({
+        by: ['testBy'],
+        where: { ...where, testBy: { not: null } },
+        _count: { _all: true },
+        orderBy: { _count: { testBy: 'desc' } },
+      }),
+      prisma.testCase.findMany({
+        where: { ...where, testingResult: { in: ['Failed', 'Blocked'] } },
+        orderBy: { updatedAt: 'desc' },
+        take: 10,
+        select: {
+          id: true, testCaseId: true, featureModule: true, testScenario: true,
+          testingResult: true, bugNote: true, testBy: true, testDate: true,
+        },
+      }),
       prisma.testCaseSet.findMany({
         where: { projectId },
         orderBy: { createdAt: 'desc' },
@@ -347,6 +404,25 @@ router.get('/:id/stats', async (req: Request, res: Response) => {
 
     const byAuto: Record<string, number> = { 'Not Automated': 0, Generated: 0, Automated: 0 };
     for (const g of autoGroups) byAuto[g.automationStatus] = g._count._all;
+
+    const byType: Record<string, number> = {};
+    for (const g of typeGroups) byType[g.type] = g._count._all;
+
+    const byTester = testerGroups
+      .filter(g => g.testBy)
+      .map(g => ({ tester: g.testBy as string, count: g._count._all }))
+      .slice(0, 10);
+
+    const attention = attentionCases.map(tc => ({
+      id: tc.id,
+      testCaseId: tc.testCaseId,
+      featureModule: tc.featureModule,
+      testScenario: tc.testScenario,
+      testingResult: tc.testingResult,
+      bugNote: tc.bugNote,
+      testBy: tc.testBy,
+      testDate: tc.testDate,
+    }));
 
     const automated = (byAuto['Generated'] || 0) + (byAuto['Automated'] || 0);
     const passed = byResult['Passed'] || 0;
@@ -368,6 +444,9 @@ router.get('/:id/stats', async (req: Request, res: Response) => {
       },
       byTestingResult: byResult,
       byAutomationStatus: byAuto,
+      byType,
+      byTester,
+      attention,
       topFeatures,
       recentSets: recentSets.map(s => ({
         id: s.id,

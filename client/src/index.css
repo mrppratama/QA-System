@@ -62,6 +62,18 @@
   background: #94a3b8;
 }
 
+/* Skeleton loading shimmer */
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(110deg, #eceef2 8%, #f6f7f9 18%, #eceef2 33%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
 /* Table editable cells */
 .editable-cell {
   @apply min-w-0 w-full px-2 py-1 text-xs border-0 bg-transparent

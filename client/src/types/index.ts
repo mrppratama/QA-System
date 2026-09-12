@@ -135,6 +135,19 @@ export interface Project {
   _count?: { testCaseSets: number };
 }
 
+export interface AttentionItem {
+  id: string;
+  testCaseId: string;
+  featureModule: string;
+  testScenario: string;
+  testingResult: string;
+  bugNote?: string | null;
+  testBy?: string | null;
+  testDate?: string | null;
+  projectId?: string | null;
+  projectName?: string | null;
+}
+
 export interface AutomationScript {
   id: string;
   projectId: string;

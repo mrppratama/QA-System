@@ -9,6 +9,7 @@ import type {
   Project,
   TestCase,
   AutomationScript,
+  AttentionItem,
 } from '../types';
 import { supabase } from '../lib/supabase';
 
@@ -88,6 +89,9 @@ export const api = {
     };
     byTestingResult: Record<string, number>;
     byAutomationStatus: Record<string, number>;
+    byType: Record<string, number>;
+    byTester: { tester: string; count: number }[];
+    attention: AttentionItem[];
     projects: { id: string; name: string; testSets: number }[];
   }> {
     return request('/projects/dashboard/stats');
@@ -106,6 +110,9 @@ export const api = {
     };
     byTestingResult: Record<string, number>;
     byAutomationStatus: Record<string, number>;
+    byType: Record<string, number>;
+    byTester: { tester: string; count: number }[];
+    attention: AttentionItem[];
     topFeatures: { feature: string; count: number }[];
     recentSets: { id: string; feature: string; count: number; createdAt: string; testedBy?: string | null }[];
   }> {
