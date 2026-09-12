@@ -1,0 +1,83 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  projectUrl  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  testCaseSets      TestCaseSet[]
+  automationScripts AutomationScript[]
+}
+
+model TestCaseSet {
+  id             String   @id @default(cuid())
+  projectId      String?
+  feature        String
+  description    String?
+  userFlow       String?
+  expectedResult String?
+  role           String?
+  testedBy       String?
+  count          Int      @default(20)
+  createdAt      DateTime @default(now())
+
+  project   Project?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  testCases TestCase[]
+}
+
+model TestCase {
+  id               String   @id @default(cuid())
+  testCaseSetId    String
+  testCaseId       String
+  featureModule    String
+  testScenario     String
+  type             String
+  precondition     String?
+  actionStep       String
+  testData         String?
+  expectedResult   String
+  actualResult     String?
+  testingResult    String   @default("Not Tested")
+  testDate         String?
+  testBy           String?
+  bugNote          String?
+  automationStatus String   @default("Not Automated")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  testCaseSet TestCaseSet @relation(fields: [testCaseSetId], references: [id], onDelete: Cascade)
+}
+
+model AutomationScript {
+  id          String   @id @default(cuid())
+  projectId   String
+  name        String
+  description String?
+  script      String
+  status      String   @default("Generated")
+  testCaseIds String   @default("[]")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model ExcelFile {
+  id           String   @id @default(cuid())
+  originalName String
+  storedName   String
+  path         String
+  sheets       String
+  createdAt    DateTime @default(now())
+}
