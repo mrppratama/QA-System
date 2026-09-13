@@ -7,6 +7,7 @@ import excelRoutes from './routes/excel';
 import projectRoutes from './routes/projects';
 import testCasesRoutes from './routes/test-cases';
 import automationRoutes from './routes/automation';
+import pagesRoutes from './routes/pages';
 import usersRoutes from './routes/users';
 import { requireAuth } from './middleware/auth';
 
@@ -36,6 +37,7 @@ app.use('/api/excel', excelRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/test-cases', testCasesRoutes);
 app.use('/api/automation', automationRoutes);
+app.use('/api/pages', pagesRoutes);
 app.use('/api/users', usersRoutes);
 
 // Global error handler

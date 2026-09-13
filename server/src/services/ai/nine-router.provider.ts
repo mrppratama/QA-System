@@ -13,9 +13,14 @@ export class NineRouterProvider implements AIProvider {
     // Default kept comfortably under Vercel's maxDuration (see vercel.json) so a
     // hung request is caught by our own AbortController instead of the platform
     // killing the whole function with an opaque FUNCTION_INVOCATION_TIMEOUT.
-    // Callers with an actual time budget (see routes/ai.ts) pass an explicit
-    // timeoutMs per call instead of relying on this default.
-    this.timeout = parseInt(process.env.NINE_ROUTER_TIMEOUT || '45000', 10);
+    // Callers with an actual time budget (see routes/ai.ts, routes/automation.ts)
+    // pass an explicit timeoutMs per call instead of relying on this default —
+    // this constructor default is only a fallback for any caller that doesn't.
+    // No Vercel maxDuration applies to a local `npm run dev` server, so this
+    // fallback is generous there too rather than inheriting the prod-safe value.
+    this.timeout = process.env.VERCEL
+      ? parseInt(process.env.NINE_ROUTER_TIMEOUT || '45000', 10)
+      : 120_000;
 
     if (!this.apiKey) {
       console.warn('[NineRouterProvider] NINE_ROUTER_API_KEY is not set');
@@ -69,8 +74,40 @@ Return ONLY valid JSON in this exact format (no markdown, no explanation):
   }
 
   async generateTestCases(input: TestCaseInput, timeoutMs?: number): Promise<GenerateResult> {
+    const { content } = await this.callChatCompletion(
+      'You are a professional QA engineer. Always return valid JSON only, no markdown formatting.',
+      this.buildPrompt(input),
+      { timeoutMs, temperature: 0.3, maxTokens: 8000 }
+    );
+    return this.parseResponse(content);
+  }
+
+  async generateAutomationScript(
+    systemPrompt: string,
+    userPrompt: string,
+    timeoutMs?: number
+  ): Promise<{ script: string; truncated: boolean }> {
+    const { content, finishReason } = await this.callChatCompletion(
+      systemPrompt,
+      userPrompt,
+      { timeoutMs, temperature: 0.2, maxTokens: 8000 }
+    );
+
+    let script = content.trim();
+    if (script.startsWith('```')) {
+      script = script.replace(/^```(?:javascript|js|python|java|ts|typescript)?\n?/, '').replace(/\n?```$/, '').trim();
+    }
+
+    return { script, truncated: finishReason === 'length' };
+  }
+
+  private async callChatCompletion(
+    systemPrompt: string,
+    userPrompt: string,
+    opts?: { timeoutMs?: number; temperature?: number; maxTokens?: number }
+  ): Promise<{ content: string; finishReason?: string }> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs ?? this.timeout);
+    const timer = setTimeout(() => controller.abort(), opts?.timeoutMs ?? this.timeout);
 
     try {
       const response = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -82,17 +119,11 @@ Return ONLY valid JSON in this exact format (no markdown, no explanation):
         body: JSON.stringify({
           model: this.model,
           messages: [
-            {
-              role: 'system',
-              content: 'You are a professional QA engineer. Always return valid JSON only, no markdown formatting.',
-            },
-            {
-              role: 'user',
-              content: this.buildPrompt(input),
-            },
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
           ],
-          temperature: 0.3,
-          max_tokens: 8000,
+          temperature: opts?.temperature ?? 0.3,
+          max_tokens: opts?.maxTokens ?? 8000,
           stream: false,
         }),
         signal: controller.signal,
@@ -106,7 +137,7 @@ Return ONLY valid JSON in this exact format (no markdown, no explanation):
       }
 
       const data = await response.json() as {
-        choices?: Array<{ message?: { content?: string } }>;
+        choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
         error?: { message?: string };
       };
 
@@ -119,7 +150,7 @@ Return ONLY valid JSON in this exact format (no markdown, no explanation):
         throw new Error('AI returned empty response');
       }
 
-      return this.parseResponse(content);
+      return { content, finishReason: data.choices?.[0]?.finish_reason };
     } catch (err) {
       clearTimeout(timer);
       throw err;

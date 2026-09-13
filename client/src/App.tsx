@@ -4,6 +4,7 @@ import { GeneratePage } from './pages/GeneratePage';
 import { TestCasesPage } from './pages/TestCasesPage';
 import { AutomationPage } from './pages/AutomationPage';
 import { ProjectsPage } from './pages/ProjectsPage';
+import { ProjectOverviewPage } from './pages/ProjectOverviewPage';
 import { LoginPage } from './pages/LoginPage';
 import { AppLayout } from './layouts/AppLayout';
 import { ProjectScopeLayout } from './layouts/ProjectScopeLayout';
@@ -32,7 +33,7 @@ export default function App() {
         <Route path="/projects" element={<ProjectsPage />} />
 
         <Route path="/projects/:slug" element={<ProjectScopeLayout />}>
-          <Route index element={<Navigate to="test-cases" replace />} />
+          <Route index element={<ProjectOverviewPage />} />
           <Route path="generate" element={<GeneratePage />} />
           <Route path="test-cases" element={<TestCasesPage />} />
           <Route path="automation" element={<AutomationPage />} />

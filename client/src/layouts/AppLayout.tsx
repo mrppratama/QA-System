@@ -108,6 +108,7 @@ export function AppLayout() {
 
   const matchDashboard  = useMatch({ path: '/dashboard', end: true });
   const matchProjects   = useMatch({ path: '/projects', end: true });
+  const matchOverview   = useMatch({ path: '/projects/:slug', end: true });
   const matchGenerate   = useMatch('/projects/:slug/generate');
   const matchTestCases  = useMatch('/projects/:slug/test-cases');
   const matchAutomation = useMatch('/projects/:slug/automation/*');
@@ -115,6 +116,7 @@ export function AppLayout() {
   const currentLabel =
     matchDashboard ? 'Dashboard' :
     matchProjects ? 'Projects' :
+    matchOverview ? 'Overview' :
     matchGenerate ? 'Generate' :
     matchTestCases ? 'Test Cases' :
     matchAutomation ? 'Automation' :
@@ -126,6 +128,7 @@ export function AppLayout() {
   // the NEW project, instead of silently updating activeProjectId while
   // the URL (and thus the visible data) stays on the old project.
   const currentProjectSegment =
+    matchOverview ? '' :
     matchGenerate ? 'generate' :
     matchTestCases ? 'test-cases' :
     matchAutomation ? 'automation' :
@@ -162,8 +165,8 @@ export function AppLayout() {
     const res = await api.createProject({ name, description });
     setProjects(prev => [res.project, ...prev]);
     handleActiveProjectChange(res.project.id);
-    if (currentProjectSegment) {
-      navigate(`/projects/${res.project.slug}/${currentProjectSegment}`);
+    if (currentProjectSegment !== null) {
+      navigate(currentProjectSegment ? `/projects/${res.project.slug}/${currentProjectSegment}` : `/projects/${res.project.slug}`);
     }
     show('success', 'Project created', name);
   }, [show, handleActiveProjectChange, currentProjectSegment, navigate]);
@@ -180,7 +183,8 @@ export function AppLayout() {
 
   const hrefFor = (item: NavItem): string | null => {
     if (!item.projectScoped) return `/${item.id}`;
-    return linkSlug ? `/projects/${linkSlug}/${item.id}` : null;
+    if (!linkSlug) return null;
+    return `/projects/${linkSlug}/${item.id}`;
   };
 
   return (
@@ -271,7 +275,9 @@ export function AppLayout() {
                   value={activeProjectId}
                   onChange={e => {
                     const proj = projects.find(p => p.id === e.target.value);
-                    if (proj) navigate(`/projects/${proj.slug}/${currentProjectSegment || 'test-cases'}`);
+                    if (!proj) return;
+                    const segment = currentProjectSegment === null ? 'test-cases' : currentProjectSegment;
+                    navigate(segment ? `/projects/${proj.slug}/${segment}` : `/projects/${proj.slug}`);
                   }}
                   className="w-full appearance-none bg-white/5 border border-white/10 text-white text-xs rounded-lg px-3 py-2 pr-7
                              focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500

@@ -27,4 +27,9 @@ export interface GenerateResult {
 
 export interface AIProvider {
   generateTestCases(input: TestCaseInput, timeoutMs?: number): Promise<GenerateResult>;
+  generateAutomationScript(
+    systemPrompt: string,
+    userPrompt: string,
+    timeoutMs?: number
+  ): Promise<{ script: string; truncated: boolean }>;
 }

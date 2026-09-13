@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { Project } from '../types';
 import { api } from '../services/api';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -6,6 +7,7 @@ import { useAppShellContext } from '../hooks/useAppShellContext';
 
 export function ProjectsPage() {
   const { projects, activeProjectId, onProjectsChange, onActiveProjectChange, onToast } = useAppShellContext();
+  const navigate = useNavigate();
 
   const [showCreate, setShowCreate] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -126,7 +128,8 @@ export function ProjectsPage() {
             return (
               <div
                 key={project.id}
-                className={`card p-4 flex items-start gap-4 ${isActive ? 'border-blue-300 bg-blue-50/30' : ''}`}
+                className={`card p-4 flex items-start gap-4 cursor-pointer ${isActive ? 'border-blue-300 bg-blue-50/30' : ''}`}
+                onClick={() => navigate(`/projects/${project.slug}`)}
               >
                 {/* Icon */}
                 <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
@@ -174,20 +177,20 @@ export function ProjectsPage() {
                 <div className="flex items-center gap-2 flex-shrink-0">
                   {!isActive && (
                     <button
-                      onClick={() => onActiveProjectChange(project.id)}
+                      onClick={e => { e.stopPropagation(); onActiveProjectChange(project.id); }}
                       className="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-2 py-1 hover:bg-blue-50"
                     >
                       Activate
                     </button>
                   )}
                   <button
-                    onClick={() => openEdit(project)}
+                    onClick={e => { e.stopPropagation(); openEdit(project); }}
                     className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 rounded px-2 py-1 hover:bg-gray-50"
                   >
                     Edit
                   </button>
                   <button
-                    onClick={() => setDeleteId(project.id)}
+                    onClick={e => { e.stopPropagation(); setDeleteId(project.id); }}
                     className="text-xs text-red-500 hover:text-red-700 border border-red-200 rounded px-2 py-1 hover:bg-red-50"
                   >
                     Delete

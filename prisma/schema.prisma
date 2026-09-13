@@ -19,6 +19,7 @@ model Project {
 
   testCaseSets      TestCaseSet[]
   automationScripts AutomationScript[]
+  pages             Page[]
 }
 
 model TestCaseSet {
@@ -65,15 +66,36 @@ model TestCase {
 }
 
 model AutomationScript {
-  id          String   @id @default(cuid())
-  projectId   String
-  name        String
-  description String?
-  script      String
-  status      String   @default("Generated")
-  testCaseIds String   @default("[]")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id               String   @id @default(cuid())
+  projectId        String
+  name             String
+  description      String?
+  script           String
+  status           String   @default("Generated")
+  tool             String?
+  generationSource String   @default("ai")
+  testCaseIds      String   @default("[]")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+model Page {
+  id            String    @id @default(cuid())
+  projectId     String
+  name          String
+  path          String    @default("/")
+  description   String?
+  requiresAuth  Boolean   @default(false)
+  // Elements found by the (not-yet-configured) scanner, as a JSON array of
+  // {selector, tag, text, role} — "[]" until a scan has actually run.
+  elements      String    @default("[]")
+  lastScannedAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 

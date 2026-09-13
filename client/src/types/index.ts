@@ -155,7 +155,22 @@ export interface AutomationScript {
   description?: string;
   script: string;
   status: string;
+  tool?: string;
+  generationSource?: string;
   testCaseIds: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface Page {
+  id: string;
+  projectId: string;
+  name: string;
+  path: string;
+  description?: string | null;
+  requiresAuth: boolean;
+  elements: string; // JSON array, "[]" until a scan has run
+  lastScannedAt?: string | null;
   createdAt: string;
   updatedAt?: string;
 }

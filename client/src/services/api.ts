@@ -10,6 +10,7 @@ import type {
   TestCase,
   AutomationScript,
   AttentionItem,
+  Page,
 } from '../types';
 import { supabase } from '../lib/supabase';
 
@@ -198,8 +199,30 @@ export const api = {
     groupBy: 'feature' | 'selection';
     featureModules?: string[];
     testCaseIds?: string[];
-  }): Promise<{ success: boolean; script: AutomationScript; tool: string }> {
-    return request('/automation/generate', { method: 'POST', body: JSON.stringify(data) });
+    pageId?: string;
+  }, signal?: AbortSignal): Promise<{ success: boolean; script: AutomationScript; tool: string; truncated?: boolean }> {
+    return request('/automation/generate', { method: 'POST', body: JSON.stringify(data), signal });
+  },
+
+  // === PAGES ===
+  async getPages(projectId: string): Promise<{ success: boolean; pages: Page[] }> {
+    return request(`/pages?projectId=${projectId}`);
+  },
+
+  async createPage(data: { projectId: string; name: string; path?: string; description?: string; requiresAuth?: boolean }): Promise<{ success: boolean; page: Page }> {
+    return request('/pages', { method: 'POST', body: JSON.stringify(data) });
+  },
+
+  async updatePage(id: string, data: { name?: string; path?: string; description?: string; requiresAuth?: boolean }): Promise<{ success: boolean; page: Page }> {
+    return request(`/pages/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+  },
+
+  async deletePage(id: string): Promise<{ success: boolean }> {
+    return request(`/pages/${id}`, { method: 'DELETE' });
+  },
+
+  async scanPage(id: string): Promise<{ success: boolean }> {
+    return request(`/pages/${id}/scan`, { method: 'POST' });
   },
 
   /** @deprecated use generateAutomation */
@@ -229,11 +252,11 @@ export const api = {
   async updateAutomationScript(
     id: string,
     data: { name?: string; description?: string; script?: string; status?: string }
-  ): Promise<{ success: boolean; script: AutomationScript }> {
+  ): Promise<{ success: boolean; script: AutomationScript; updatedTestCaseCount?: number }> {
     return request(`/automation/${id}`, { method: 'PUT', body: JSON.stringify(data) });
   },
 
-  async deleteAutomationScript(id: string): Promise<{ success: boolean }> {
+  async deleteAutomationScript(id: string): Promise<{ success: boolean; updatedTestCaseCount?: number }> {
     return request(`/automation/${id}`, { method: 'DELETE' });
   },
 

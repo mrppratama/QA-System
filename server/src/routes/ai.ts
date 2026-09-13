@@ -38,9 +38,11 @@ router.post('/generate-test-cases', aiRateLimiter, async (req: Request, res: Res
     // budget remaining (not the provider's own fixed default), so a slow first
     // attempt plus a retry can never together exceed the platform limit and
     // get killed with an opaque FUNCTION_INVOCATION_TIMEOUT instead of the
-    // error handling below.
+    // error handling below. This budget only matters on Vercel — a local
+    // `npm run dev` server has no such platform-imposed ceiling, so give it a
+    // much longer budget instead of aborting real (if slow) AI responses.
     const startedAt = Date.now();
-    const FUNCTION_BUDGET_MS = 55_000; // stay under vercel.json's 60s maxDuration
+    const FUNCTION_BUDGET_MS = process.env.VERCEL ? 55_000 : 300_000;
     const SAFETY_MARGIN_MS = 3_000;    // room for validation + response after the call returns
     const MIN_ATTEMPT_MS = 10_000;     // not worth attempting with less time than this
     const RETRY_DELAY_MS = 500;

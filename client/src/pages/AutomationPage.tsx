@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import type { AutomationScript, AutomationTool } from '../types';
+import type { AutomationScript, AutomationTool, Page } from '../types';
 import { AUTOMATION_TOOLS } from '../types';
 import { api } from '../services/api';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -12,10 +12,19 @@ interface FeatureGroup {
   selected: boolean;
 }
 
+function parseTestCaseIds(raw: string): string[] {
+  try {
+    return JSON.parse(raw || '[]');
+  } catch {
+    return [];
+  }
+}
+
 export function AutomationPage() {
   const { activeProject, onToast } = useProjectScopeContext();
   const { scriptId } = useParams<{ scriptId?: string }>();
   const navigate = useNavigate();
+  const automationBasePath = `/projects/${activeProject.slug}/automation`;
 
   const [localView, setLocalView] = useState<'list' | 'generate'>('list');
   const [lastScriptId, setLastScriptId] = useState<string | null>(null);
@@ -30,6 +39,11 @@ export function AutomationPage() {
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [nameEditedManually, setNameEditedManually] = useState(false);
+  const [pages, setPages] = useState<Page[]>([]);
+  const [selectedPageId, setSelectedPageId] = useState<string>('');
+  const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
+  const generateAbortRef = useRef<AbortController | null>(null);
 
   const view: 'list' | 'generate' | 'editor' = scriptId ? 'editor' : localView;
   const activeScript = scriptId ? scripts.find(s => s.id === scriptId) ?? null : null;
@@ -51,12 +65,14 @@ export function AutomationPage() {
     if (!activeProject) return;
     setLoading(true);
     try {
-      const [scriptRes, featRes] = await Promise.all([
+      const [scriptRes, featRes, pageRes] = await Promise.all([
         api.getAutomationScripts(activeProject.id),
         api.getAutomationFeatures(activeProject.id),
+        api.getPages(activeProject.id),
       ]);
       setScripts(scriptRes.scripts);
       setFeatures(featRes.features.map(f => ({ ...f, selected: false })));
+      setPages(pageRes.pages);
     } catch (err) {
       onToast('error', 'Failed to load data', (err as Error).message);
     } finally {
@@ -66,8 +82,20 @@ export function AutomationPage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Auto-fill script name based on selected features
+  // Cancel an in-flight generate request when the active project changes
+  // (ProjectScopeLayout remounts this page via `key={project.id}` on project
+  // switch, so this cleanup also covers unmount).
   useEffect(() => {
+    return () => {
+      generateAbortRef.current?.abort();
+    };
+  }, [activeProject?.id]);
+
+  // Auto-fill script name based on selected features — but never clobber a
+  // name the user has manually typed. Clearing the field back to empty is
+  // the explicit "give control back to auto-fill" gesture.
+  useEffect(() => {
+    if (nameEditedManually) return;
     const selected = features.filter(f => f.selected);
     if (selected.length === 0) { setScriptName(''); return; }
     if (selected.length === 1) {
@@ -75,7 +103,7 @@ export function AutomationPage() {
     } else {
       setScriptName(`${activeProject?.name || 'Project'} - ${selected.length} Features`);
     }
-  }, [features, activeProject]);
+  }, [features, activeProject, nameEditedManually]);
 
   const selectedFeatures = features.filter(f => f.selected);
   const totalSelectedTestCases = selectedFeatures.reduce((sum, f) => sum + f.count, 0);
@@ -91,6 +119,8 @@ export function AutomationPage() {
 
   const handleGenerate = async () => {
     if (!activeProject || selectedFeatures.length === 0 || !scriptName.trim()) return;
+    const controller = new AbortController();
+    generateAbortRef.current = controller;
     setGenerating(true);
     try {
       const res = await api.generateAutomation({
@@ -100,15 +130,24 @@ export function AutomationPage() {
         tool: selectedTool,
         groupBy: 'feature',
         featureModules: selectedFeatures.map(f => f.featureModule),
-      });
+        pageId: selectedPageId || undefined,
+      }, controller.signal);
       setScripts(prev => [res.script, ...prev]);
       setLastScriptId(res.script.id);
-      navigate(res.script.id);
+      navigate(`${automationBasePath}/${res.script.id}`);
       onToast('success', 'Script generated!', res.script.name);
+      if (res.truncated) {
+        onToast('warning', 'Script mungkin terpotong', 'Response AI kepanjangan — cek ulang bagian akhir script');
+      }
+      // Light reset so returning to this tab doesn't silently offer to
+      // duplicate the same generate again.
+      setFeatures(prev => prev.map(f => ({ ...f, selected: false })));
+      setScriptDesc('');
     } catch (err) {
+      if (controller.signal.aborted) return;
       onToast('error', 'Failed to generate script', (err as Error).message);
     } finally {
-      setGenerating(false);
+      if (!controller.signal.aborted) setGenerating(false);
     }
   };
 
@@ -134,7 +173,7 @@ export function AutomationPage() {
 
   const handleDownload = () => {
     if (!activeScript) return;
-    const toolInfo = AUTOMATION_TOOLS.find(t => activeScript.name.includes(t.label)) || AUTOMATION_TOOLS[0];
+    const toolInfo = AUTOMATION_TOOLS.find(t => t.value === activeScript.tool) || AUTOMATION_TOOLS[0];
     const ext = toolInfo.ext;
     const blob = new Blob([editedScript], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -149,11 +188,20 @@ export function AutomationPage() {
   };
 
   const handleUpdateStatus = async (id: string, status: string) => {
+    setStatusUpdatingId(id);
     try {
       const res = await api.updateAutomationScript(id, { status });
       setScripts(prev => prev.map(s => s.id === id ? res.script : s));
+      const count = res.updatedTestCaseCount;
+      onToast(
+        'success',
+        status === 'Automated' ? 'Marked as Automated' : 'Status updated',
+        typeof count === 'number' && count > 0 ? `${count} test case(s) updated` : undefined
+      );
     } catch (err) {
       onToast('error', 'Failed to update', (err as Error).message);
+    } finally {
+      setStatusUpdatingId(null);
     }
   };
 
@@ -161,23 +209,24 @@ export function AutomationPage() {
     if (!deleteId) return;
     setDeleteLoading(true);
     try {
-      await api.deleteAutomationScript(deleteId);
+      const res = await api.deleteAutomationScript(deleteId);
       setScripts(prev => prev.filter(s => s.id !== deleteId));
       if (activeScript?.id === deleteId) {
-        navigate('.');
-        if (lastScriptId === deleteId) setLastScriptId(null);
+        navigate(automationBasePath);
       }
+      if (lastScriptId === deleteId) setLastScriptId(null);
       setDeleteId(null);
-      onToast('success', 'Script deleted');
+      const count = res.updatedTestCaseCount;
+      onToast(
+        'success',
+        'Script deleted',
+        typeof count === 'number' && count > 0 ? `${count} test case(s) reverted to Not Automated` : undefined
+      );
     } catch (err) {
       onToast('error', 'Failed to delete', (err as Error).message);
     } finally {
       setDeleteLoading(false);
     }
-  };
-
-  const toolExt: Record<AutomationTool, string> = {
-    cypress: '.cy.js', playwright: '.spec.ts', selenium: '.test.js',
   };
 
   if (!activeProject) {
@@ -202,9 +251,9 @@ export function AutomationPage() {
               key={v}
               onClick={() => {
                 if (v === 'editor') {
-                  if (lastScriptId) navigate(lastScriptId);
+                  if (lastScriptId) navigate(`${automationBasePath}/${lastScriptId}`);
                 } else {
-                  if (scriptId) navigate('.');
+                  if (scriptId) navigate(automationBasePath);
                   setLocalView(v as 'list' | 'generate');
                 }
               }}
@@ -265,10 +314,15 @@ export function AutomationPage() {
                         }`}>
                           {script.status}
                         </span>
+                        {script.tool && AUTOMATION_TOOLS.find(t => t.value === script.tool) && (
+                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${AUTOMATION_TOOLS.find(t => t.value === script.tool)!.color}`}>
+                            {AUTOMATION_TOOLS.find(t => t.value === script.tool)!.label}
+                          </span>
+                        )}
                       </div>
                       {script.description && <p className="text-xs text-gray-500 mt-0.5">{script.description}</p>}
                       <p className="text-xs text-gray-400 mt-1">
-                        {(JSON.parse(script.testCaseIds || '[]') as string[]).length} test case(s) ·
+                        {parseTestCaseIds(script.testCaseIds).length} test case(s) ·
                         {' '}{new Date(script.createdAt).toLocaleDateString('id-ID')}
                       </p>
                     </div>
@@ -276,13 +330,14 @@ export function AutomationPage() {
                       {script.status === 'Generated' && (
                         <button
                           onClick={() => handleUpdateStatus(script.id, 'Automated')}
-                          className="text-xs px-2 py-1 border border-green-200 text-green-700 rounded hover:bg-green-50"
+                          disabled={statusUpdatingId === script.id}
+                          className="text-xs px-2 py-1 border border-green-200 text-green-700 rounded hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          Mark Automated
+                          {statusUpdatingId === script.id ? 'Updating...' : 'Mark Automated'}
                         </button>
                       )}
                       <button
-                        onClick={() => { setLastScriptId(script.id); navigate(script.id); }}
+                        onClick={() => { setLastScriptId(script.id); navigate(`${automationBasePath}/${script.id}`); }}
                         className="text-xs px-2 py-1 border border-gray-200 text-gray-700 rounded hover:bg-gray-50"
                       >
                         Buka Editor
@@ -356,7 +411,11 @@ export function AutomationPage() {
                   className="input-field"
                   placeholder="e.g. Login Tests"
                   value={scriptName}
-                  onChange={e => setScriptName(e.target.value)}
+                  onChange={e => {
+                    const v = e.target.value;
+                    setScriptName(v);
+                    setNameEditedManually(v !== '');
+                  }}
                 />
               </div>
               <div>
@@ -369,6 +428,22 @@ export function AutomationPage() {
                   onChange={e => setScriptDesc(e.target.value)}
                 />
               </div>
+              {pages.length > 0 && (
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1 uppercase tracking-wide">Halaman terkait (opsional)</label>
+                  <select
+                    className="input-field"
+                    value={selectedPageId}
+                    onChange={e => setSelectedPageId(e.target.value)}
+                  >
+                    <option value="">— Tidak ada —</option>
+                    {pages.map(p => (
+                      <option key={p.id} value={p.id}>{p.name} ({p.path})</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-400 mt-1">Konteks halaman ini (deskripsi/elemen) ikut disuntik ke prompt AI</p>
+                </div>
+              )}
 
               {/* Summary */}
               <div className={`rounded-lg p-3 text-xs ${selectedFeatures.length > 0 ? 'bg-blue-50 text-blue-800' : 'bg-gray-50 text-gray-500'}`}>
@@ -429,7 +504,15 @@ export function AutomationPage() {
               )}
             </div>
 
-            {features.length === 0 ? (
+            {loading ? (
+              <div className="flex items-center justify-center py-12 text-gray-400 text-sm">
+                <svg className="w-5 h-5 animate-spin text-blue-500 mr-2" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Memuat features...
+              </div>
+            ) : features.length === 0 ? (
               <div className="text-center py-12 text-gray-400">
                 <svg className="w-10 h-10 mx-auto mb-2 text-gray-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -474,6 +557,22 @@ export function AutomationPage() {
       {/* ── EDITOR VIEW ── */}
       {view === 'editor' && activeScript && (
         <div className="space-y-3">
+        {/* Fallback-template banner — AI generation failed for this script */}
+        {activeScript.generationSource === 'fallback' && (
+          <div className="flex items-start gap-3 bg-amber-50 border border-amber-300 rounded-lg px-4 py-3 text-xs text-amber-900">
+            <svg className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div className="space-y-1">
+              <p className="font-semibold">AI generation failed — this is a bare-bones template</p>
+              <p className="text-amber-800 leading-relaxed">
+                The AI service was unavailable or errored when this script was created, so a basic
+                boilerplate template was used instead. Review carefully — it likely needs significantly
+                more manual work than an AI-generated script.
+              </p>
+            </div>
+          </div>
+        )}
         {/* Info banner — hanya muncul jika script masih Generated (belum disesuaikan) */}
         {activeScript.status !== 'Automated' && (
           <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-xs text-blue-800">
@@ -506,6 +605,11 @@ export function AutomationPage() {
               }`}>
                 {activeScript.status}
               </span>
+              {activeScript.tool && AUTOMATION_TOOLS.find(t => t.value === activeScript.tool) && (
+                <span className="text-xs px-1.5 py-0.5 rounded font-medium bg-gray-700 text-gray-200">
+                  {AUTOMATION_TOOLS.find(t => t.value === activeScript.tool)!.label}
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <button onClick={handleCopy} className="text-xs text-gray-300 hover:text-white flex items-center gap-1">
@@ -530,9 +634,10 @@ export function AutomationPage() {
               {activeScript.status === 'Generated' && (
                 <button
                   onClick={() => handleUpdateStatus(activeScript.id, 'Automated')}
-                  className="text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded"
+                  disabled={statusUpdatingId === activeScript.id}
+                  className="text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Mark Automated
+                  {statusUpdatingId === activeScript.id ? 'Updating...' : 'Mark Automated'}
                 </button>
               )}
             </div>
@@ -549,6 +654,16 @@ export function AutomationPage() {
       )}
 
       {/* ── EDITOR VIEW: script not found (deleted, or bad URL) ── */}
+      {view === 'editor' && loading && !activeScript && (
+        <div className="card p-8 flex items-center justify-center text-gray-500 text-sm">
+          <svg className="w-5 h-5 animate-spin text-blue-500 mr-2" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          Memuat script...
+        </div>
+      )}
+
       {view === 'editor' && !activeScript && !loading && (
         <div className="card p-12 flex flex-col items-center text-center text-gray-400">
           <svg className="w-12 h-12 mb-3 text-gray-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -556,7 +671,7 @@ export function AutomationPage() {
           </svg>
           <p className="text-sm font-medium text-gray-500">Script not found</p>
           <p className="text-xs mt-1">It may have been deleted.</p>
-          <button onClick={() => navigate('.')} className="mt-4 btn-secondary text-sm">
+          <button onClick={() => navigate(automationBasePath)} className="mt-4 btn-secondary text-sm">
             Back to list
           </button>
         </div>
