@@ -34,26 +34,31 @@ router.post('/generate-test-cases', aiRateLimiter, async (req: Request, res: Res
     let lastError: Error | null = null;
 
     // Retry only if there's still enough time left in the Vercel function's
-    // maxDuration (see vercel.json) — otherwise a slow/timed-out first attempt
-    // plus a full-length retry would exceed the platform limit and get killed
-    // with an opaque 504 instead of the error handling below.
+    // maxDuration (see vercel.json) — each attempt is given exactly the time
+    // budget remaining (not the provider's own fixed default), so a slow first
+    // attempt plus a retry can never together exceed the platform limit and
+    // get killed with an opaque FUNCTION_INVOCATION_TIMEOUT instead of the
+    // error handling below.
     const startedAt = Date.now();
     const FUNCTION_BUDGET_MS = 55_000; // stay under vercel.json's 60s maxDuration
+    const SAFETY_MARGIN_MS = 3_000;    // room for validation + response after the call returns
+    const MIN_ATTEMPT_MS = 10_000;     // not worth attempting with less time than this
     const RETRY_DELAY_MS = 500;
 
     for (let attempt = 0; attempt < 2; attempt++) {
+      const remaining = FUNCTION_BUDGET_MS - (Date.now() - startedAt) - SAFETY_MARGIN_MS;
+      if (remaining < MIN_ATTEMPT_MS) {
+        if (!lastError) lastError = new Error('Not enough time left in this request to call the AI provider');
+        break;
+      }
       try {
-        result = await aiProvider.generateTestCases(input);
+        result = await aiProvider.generateTestCases(input, remaining);
         break;
       } catch (err) {
         lastError = err as Error;
-        const elapsed = Date.now() - startedAt;
-        const canRetry = attempt === 0 && elapsed + RETRY_DELAY_MS < FUNCTION_BUDGET_MS;
-        if (canRetry) {
+        if (attempt === 0) {
           console.warn('[AI] First attempt failed, retrying...', err);
           await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
-        } else {
-          break;
         }
       }
     }

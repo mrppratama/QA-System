@@ -118,7 +118,10 @@ router.post('/generate', aiRateLimiter, async (req: Request, res: Response) => {
           max_tokens: 8000,
           stream: false,
         }),
-        signal: AbortSignal.timeout(parseInt(process.env.NINE_ROUTER_TIMEOUT || '60000', 10)),
+        // Kept comfortably under vercel.json's 60s maxDuration so our own abort
+        // (which falls back to a template below) fires before the platform kills
+        // the whole function with an opaque FUNCTION_INVOCATION_TIMEOUT.
+        signal: AbortSignal.timeout(parseInt(process.env.NINE_ROUTER_TIMEOUT || '45000', 10)),
       });
 
       if (!response.ok) {

@@ -10,7 +10,12 @@ export class NineRouterProvider implements AIProvider {
     this.baseUrl = process.env.NINE_ROUTER_BASE_URL || 'https://api.9router.ai/v1';
     this.apiKey = process.env.NINE_ROUTER_API_KEY || '';
     this.model = process.env.NINE_ROUTER_MODEL || 'gpt-4o';
-    this.timeout = parseInt(process.env.NINE_ROUTER_TIMEOUT || '60000', 10);
+    // Default kept comfortably under Vercel's maxDuration (see vercel.json) so a
+    // hung request is caught by our own AbortController instead of the platform
+    // killing the whole function with an opaque FUNCTION_INVOCATION_TIMEOUT.
+    // Callers with an actual time budget (see routes/ai.ts) pass an explicit
+    // timeoutMs per call instead of relying on this default.
+    this.timeout = parseInt(process.env.NINE_ROUTER_TIMEOUT || '45000', 10);
 
     if (!this.apiKey) {
       console.warn('[NineRouterProvider] NINE_ROUTER_API_KEY is not set');
@@ -63,9 +68,9 @@ Return ONLY valid JSON in this exact format (no markdown, no explanation):
 }`;
   }
 
-  async generateTestCases(input: TestCaseInput): Promise<GenerateResult> {
+  async generateTestCases(input: TestCaseInput, timeoutMs?: number): Promise<GenerateResult> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeout);
+    const timer = setTimeout(() => controller.abort(), timeoutMs ?? this.timeout);
 
     try {
       const response = await fetch(`${this.baseUrl}/chat/completions`, {

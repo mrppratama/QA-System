@@ -26,5 +26,5 @@ export interface GenerateResult {
 }
 
 export interface AIProvider {
-  generateTestCases(input: TestCaseInput): Promise<GenerateResult>;
+  generateTestCases(input: TestCaseInput, timeoutMs?: number): Promise<GenerateResult>;
 }
