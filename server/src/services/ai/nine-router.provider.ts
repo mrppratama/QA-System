@@ -53,9 +53,10 @@ Requirements:
 - Do NOT invent business rules not mentioned above
 - Do NOT generate test cases unrelated to the feature
 - Each action step should be numbered (e.g. "1. Open page\n2. Click button")
-${hasCredentials ? `- For test cases that require login, include the actual credentials in the testData field (e.g. "Username: ${input.username || 'user'} | Password: ${input.password || 'pass'}")` : ''}
+${hasCredentials ? `- For test cases that require login, include the actual credentials in the testData field (e.g. "Username: ${input.username || 'user'}\\nPassword: ${input.password || 'pass'}")` : ''}
 - For negative/invalid test cases, use wrong credentials or edge case values in testData
 - testData must be specific and useful (not just '-' unless truly no data needed)
+- When testData has more than one field, put each field on its own line with "\\n" (e.g. "Name: John Doe\\nEmail: john@example.com\\nRole: Tenant") — do NOT join multiple fields on a single line with "|", it becomes unreadable in the test case table
 
 Return ONLY valid JSON in this exact format (no markdown, no explanation):
 {
@@ -66,7 +67,7 @@ Return ONLY valid JSON in this exact format (no markdown, no explanation):
       "type": "Happy Path|Validation|Error Case|Important edge case",
       "precondition": "What needs to be true before the test",
       "actionStep": "1. Step one\\n2. Step two\\n3. Step three",
-      "testData": "Specific data used in the test (credentials, input values, etc.)",
+      "testData": "Field: value\\nAnother field: another value (one field per line via \\n, never joined with |)",
       "expectedResult": "What should happen"
     }
   ]

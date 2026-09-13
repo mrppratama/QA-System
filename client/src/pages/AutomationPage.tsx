@@ -137,7 +137,7 @@ export function AutomationPage() {
       navigate(`${automationBasePath}/${res.script.id}`);
       onToast('success', 'Script generated!', res.script.name);
       if (res.truncated) {
-        onToast('warning', 'Script mungkin terpotong', 'Response AI kepanjangan — cek ulang bagian akhir script');
+        onToast('warning', 'AI response kepanjangan', 'Dipakai template dasar sebagai gantinya (bukan hasil AI) — lihat banner di editor');
       }
       // Light reset so returning to this tab doesn't silently offer to
       // duplicate the same generate again.

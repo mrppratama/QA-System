@@ -207,7 +207,7 @@ export function ProjectOverviewPage() {
                       )}
                       <p className="text-xs text-gray-400 mt-1">
                         {elementCount > 0
-                          ? `${elementCount} elemen ditemukan · terakhir di-scan ${new Date(page.lastScannedAt!).toLocaleDateString('id-ID')}`
+                          ? `${elementCount} elemen ditemukan${page.lastScannedAt ? ` · terakhir di-scan ${new Date(page.lastScannedAt).toLocaleDateString('id-ID')}` : ''}`
                           : 'Belum pernah di-scan'}
                       </p>
                     </div>

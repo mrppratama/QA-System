@@ -64,6 +64,9 @@ router.put('/:id', async (req: Request, res: Response) => {
     if (!parseResult.success) {
       return res.status(400).json({ success: false, error: 'Invalid input', details: parseResult.error.flatten() });
     }
+    const existing = await prisma.page.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ success: false, error: 'Page not found' });
+
     const page = await prisma.page.update({ where: { id: req.params.id }, data: parseResult.data });
     return res.json({ success: true, page });
   } catch (err) {
@@ -74,6 +77,9 @@ router.put('/:id', async (req: Request, res: Response) => {
 // DELETE /api/pages/:id
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
+    const existing = await prisma.page.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ success: false, error: 'Page not found' });
+
     await prisma.page.delete({ where: { id: req.params.id } });
     return res.json({ success: true });
   } catch (err) {

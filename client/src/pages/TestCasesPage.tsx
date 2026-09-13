@@ -606,7 +606,7 @@ function Cell({ children, className = '', onClick, onExpand, expanded, expandTit
       <div
         onClick={handleClick}
         title={title}
-        className={`${expanded ? '' : 'line-clamp-3'} whitespace-pre-line text-xs leading-relaxed text-gray-700 ${
+        className={`${expanded ? '' : 'line-clamp-3'} whitespace-pre-line break-words max-w-[420px] text-xs leading-relaxed text-gray-700 ${
           handleClick ? 'cursor-pointer hover:text-blue-700' : ''
         } ${className}`}
       >
