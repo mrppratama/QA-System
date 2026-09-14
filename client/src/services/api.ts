@@ -42,6 +42,76 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   return data;
 }
 
+// === Background job helpers (see server/src/routes/jobs.ts) ===
+// AI generation can legitimately take longer than a single HTTP request
+// should stay open for — these wrap the start/poll dance behind the same
+// external shape callers used when it was a single blocking request, so
+// GeneratePage.tsx / AutomationPage.tsx need no changes.
+const JOB_POLL_INTERVAL_MS = 2000;
+const JOB_POLL_TIMEOUT_MS = 5 * 60 * 1000; // give up after 5 minutes of polling
+
+async function startJob(type: 'test-case' | 'automation', payload: Record<string, unknown>, signal?: AbortSignal): Promise<string> {
+  const res = await request<{ success: boolean; jobId: string }>('/jobs', {
+    method: 'POST',
+    body: JSON.stringify({ type, payload }),
+    signal,
+  });
+  return res.jobId;
+}
+
+// Resolves after `ms`, or rejects immediately (as an AbortError) if `signal`
+// fires first — a plain `setTimeout` sleep would otherwise sit there for the
+// full interval before a cancellation gets noticed.
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new DOMException('Aborted', 'AbortError')); return; }
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    }, { once: true });
+  });
+}
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'AbortError';
+}
+
+const MAX_CONSECUTIVE_POLL_FAILURES = 3;
+
+async function pollJob<T>(jobId: string, signal?: AbortSignal): Promise<T> {
+  const startedAt = Date.now();
+  let consecutiveFailures = 0;
+
+  for (;;) {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    if (Date.now() - startedAt > JOB_POLL_TIMEOUT_MS) {
+      throw new Error('Generation is taking longer than expected. Please try again later.');
+    }
+
+    let res: { success: boolean; status: string; result: T; error?: string };
+    try {
+      res = await request<{ success: boolean; status: string; result: T; error?: string }>(`/jobs/${jobId}`, { signal });
+      consecutiveFailures = 0;
+    } catch (err) {
+      // A deliberate cancellation is never "transient" — surface it right away.
+      if (isAbortError(err) || signal?.aborted) throw err;
+      // One flaky poll (a network blip, a momentary 5xx) shouldn't sink an
+      // otherwise-successful background job — only give up after a run of
+      // consecutive failures, not on the first one.
+      consecutiveFailures++;
+      if (consecutiveFailures >= MAX_CONSECUTIVE_POLL_FAILURES) throw err;
+      await sleep(JOB_POLL_INTERVAL_MS, signal);
+      continue;
+    }
+
+    if (res.status === 'completed') return res.result;
+    if (res.status === 'failed') throw new Error(res.error || 'Generation failed');
+
+    await sleep(JOB_POLL_INTERVAL_MS, signal);
+  }
+}
+
 export const api = {
   // === USERS ===
   async getUsers(): Promise<{ success: boolean; users: { id: string; email: string; name?: string }[] }> {
@@ -49,11 +119,10 @@ export const api = {
   },
 
   // === AI ===
-  async generateTestCases(input: GenerateInput): Promise<GenerateResponse> {
-    return request<GenerateResponse>('/ai/generate-test-cases', {
-      method: 'POST',
-      body: JSON.stringify(input),
-    });
+  async generateTestCases(input: GenerateInput, signal?: AbortSignal): Promise<GenerateResponse> {
+    const jobId = await startJob('test-case', input as unknown as Record<string, unknown>, signal);
+    const result = await pollJob<{ testCases: GenerateResponse['testCases']; count: number }>(jobId, signal);
+    return { success: true, testCases: result.testCases, count: result.count };
   },
 
   // === PROJECTS ===
@@ -201,7 +270,9 @@ export const api = {
     testCaseIds?: string[];
     pageId?: string;
   }, signal?: AbortSignal): Promise<{ success: boolean; script: AutomationScript; tool: string; truncated?: boolean }> {
-    return request('/automation/generate', { method: 'POST', body: JSON.stringify(data), signal });
+    const jobId = await startJob('automation', data as unknown as Record<string, unknown>, signal);
+    const result = await pollJob<{ script: AutomationScript; tool: string; truncated?: boolean }>(jobId, signal);
+    return { success: true, ...result };
   },
 
   // === PAGES ===

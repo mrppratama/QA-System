@@ -84,6 +84,30 @@ input:-webkit-autofill:focus {
   animation: skeleton-shimmer 1.5s ease-in-out infinite;
 }
 
+/* AI "thinking" step indicator (GeneratingProgress) */
+@keyframes text-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.text-shimmer {
+  background-image: linear-gradient(90deg, #6b7280 40%, #111827 50%, #6b7280 60%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: text-shimmer 2s linear infinite;
+}
+
+@keyframes step-fade-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.step-fade-in {
+  animation: step-fade-in 0.3s ease-out;
+}
+
 /* Table editable cells */
 .editable-cell {
   @apply min-w-0 w-full px-2 py-1 text-xs border-0 bg-transparent

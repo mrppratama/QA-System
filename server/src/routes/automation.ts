@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import { z } from 'zod';
 import { aiRateLimiter } from '../middleware/rateLimiter';
 import { createAIProvider } from '../services/ai';
+import { HttpError } from '../lib/httpError';
 
 const router = Router();
 
@@ -65,7 +66,7 @@ router.get('/', async (req: Request, res: Response) => {
 const SUPPORTED_TOOLS = ['cypress', 'playwright', 'selenium'] as const;
 type AutomationTool = typeof SUPPORTED_TOOLS[number];
 
-const GenerateAutomationSchema = z.object({
+export const GenerateAutomationSchema = z.object({
   projectId: z.string().min(1),
   name: z.string().min(1),
   description: z.string().optional(),
@@ -98,6 +99,127 @@ const GenerateAutomationSchema = z.object({
   }
 });
 
+// Core generation logic, extracted so it can be called both from the
+// synchronous route below and from the background job runner (routes/jobs.ts)
+// used to dodge Vercel's request/response timeout for slow AI calls.
+export async function runGenerateAutomation(input: z.infer<typeof GenerateAutomationSchema>) {
+  const { projectId, name, description, tool, groupBy, featureModules, testCaseIds, pageId } = input;
+
+  // Verify project exists
+  const project = await prisma.project.findUnique({ where: { id: projectId } });
+  if (!project) {
+    throw new HttpError(404, 'Project not found');
+  }
+
+  const baseUrl = project.projectUrl || null;
+
+  // Optional Page context (see routes/pages.ts) — folds a page's description
+  // and any scanned real elements into the prompt so the AI can ground
+  // selectors in something more concrete than a blind guess.
+  let pageContext: { name: string; path: string; description: string | null; elements: unknown[] } | null = null;
+  if (pageId) {
+    const page = await prisma.page.findFirst({ where: { id: pageId, projectId } });
+    if (page) {
+      let elements: unknown[] = [];
+      try {
+        const parsed = JSON.parse(page.elements);
+        if (Array.isArray(parsed)) elements = parsed;
+      } catch { /* leave elements as [] */ }
+      pageContext = { name: page.name, path: page.path, description: page.description, elements };
+    }
+  }
+
+  // Fetch test cases
+  let testCases;
+  if (groupBy === 'feature' && featureModules && featureModules.length > 0) {
+    testCases = await prisma.testCase.findMany({
+      where: {
+        testCaseSet: { projectId },
+        featureModule: { in: featureModules },
+      },
+      orderBy: [{ featureModule: 'asc' }, { testCaseId: 'asc' }],
+    });
+  } else if (groupBy === 'selection' && testCaseIds && testCaseIds.length > 0) {
+    testCases = await prisma.testCase.findMany({
+      where: {
+        id: { in: testCaseIds },
+        testCaseSet: { projectId },
+      },
+      orderBy: [{ featureModule: 'asc' }, { testCaseId: 'asc' }],
+    });
+  } else {
+    throw new HttpError(400, 'Provide featureModules or testCaseIds');
+  }
+
+  if (testCases.length === 0) {
+    throw new HttpError(404, 'No test cases found for given selection');
+  }
+
+  // Group test cases by featureModule
+  const grouped: Record<string, typeof testCases> = {};
+  for (const tc of testCases) {
+    const key = tc.featureModule;
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(tc);
+  }
+
+  // Build prompt
+  const prompt = buildAutomationPrompt(tool, name, grouped, description, baseUrl, pageContext);
+
+  // Call AI (via the shared provider — inherits its data.error/empty-content
+  // validation and finish_reason tracking instead of a second, drifted copy)
+  let script = '';
+  let usedFallback = false;
+  let truncated = false;
+  try {
+    const aiProvider = createAIProvider();
+    // NINE_ROUTER_TIMEOUT exists to stay under Vercel's maxDuration in
+    // production — that constraint doesn't exist for a local `npm run dev`
+    // server, so give it a much longer budget there instead of aborting a
+    // real (if slow) AI response.
+    const timeoutMs = process.env.VERCEL
+      ? parseInt(process.env.NINE_ROUTER_TIMEOUT || '45000', 10)
+      : 120_000;
+    const result = await aiProvider.generateAutomationScript(getSystemPrompt(tool), prompt, timeoutMs);
+    if (result.truncated) {
+      // A truncated response is likely incomplete/syntactically broken —
+      // treat it the same as an AI failure (fall back to the deterministic
+      // template) rather than silently persisting broken code as a success.
+      truncated = true;
+      throw new Error('AI response was truncated (hit max_tokens)');
+    }
+    script = result.script;
+  } catch (aiErr) {
+    console.warn('[Automation] AI failed, using fallback template:', aiErr);
+    script = generateFallbackScript(tool, name, grouped, baseUrl);
+    usedFallback = true;
+  }
+
+  // Save to DB
+  const automationScript = await prisma.automationScript.create({
+    data: {
+      projectId,
+      name,
+      description,
+      script,
+      status: 'Generated',
+      tool,
+      generationSource: usedFallback ? 'fallback' : 'ai',
+      testCaseIds: JSON.stringify(testCases.map(tc => tc.id)),
+    },
+  });
+
+  // Update automation status on test cases — only upgrade test cases that
+  // aren't already 'Automated' (a manually-set, more deliberate signal than
+  // 'Generated'; regenerating a script shouldn't silently downgrade it).
+  await prisma.testCase.updateMany({
+    where: { id: { in: testCases.map(tc => tc.id) }, automationStatus: 'Not Automated' },
+    data: { automationStatus: 'Generated' },
+  });
+
+  return { script: automationScript, tool, truncated };
+}
+
 router.post('/generate', aiRateLimiter, async (req: Request, res: Response) => {
   try {
     const parseResult = GenerateAutomationSchema.safeParse(req.body);
@@ -109,124 +231,12 @@ router.post('/generate', aiRateLimiter, async (req: Request, res: Response) => {
       });
     }
 
-    const { projectId, name, description, tool, groupBy, featureModules, testCaseIds, pageId } = parseResult.data;
-
-    // Verify project exists
-    const project = await prisma.project.findUnique({ where: { id: projectId } });
-    if (!project) {
-      return res.status(404).json({ success: false, error: 'Project not found' });
-    }
-
-    const baseUrl = project.projectUrl || null;
-
-    // Optional Page context (see routes/pages.ts) — folds a page's description
-    // and any scanned real elements into the prompt so the AI can ground
-    // selectors in something more concrete than a blind guess.
-    let pageContext: { name: string; path: string; description: string | null; elements: unknown[] } | null = null;
-    if (pageId) {
-      const page = await prisma.page.findFirst({ where: { id: pageId, projectId } });
-      if (page) {
-        let elements: unknown[] = [];
-        try {
-          const parsed = JSON.parse(page.elements);
-          if (Array.isArray(parsed)) elements = parsed;
-        } catch { /* leave elements as [] */ }
-        pageContext = { name: page.name, path: page.path, description: page.description, elements };
-      }
-    }
-
-    // Fetch test cases
-    let testCases;
-    if (groupBy === 'feature' && featureModules && featureModules.length > 0) {
-      testCases = await prisma.testCase.findMany({
-        where: {
-          testCaseSet: { projectId },
-          featureModule: { in: featureModules },
-        },
-        orderBy: [{ featureModule: 'asc' }, { testCaseId: 'asc' }],
-      });
-    } else if (groupBy === 'selection' && testCaseIds && testCaseIds.length > 0) {
-      testCases = await prisma.testCase.findMany({
-        where: {
-          id: { in: testCaseIds },
-          testCaseSet: { projectId },
-        },
-        orderBy: [{ featureModule: 'asc' }, { testCaseId: 'asc' }],
-      });
-    } else {
-      return res.status(400).json({ success: false, error: 'Provide featureModules or testCaseIds' });
-    }
-
-    if (testCases.length === 0) {
-      return res.status(404).json({ success: false, error: 'No test cases found for given selection' });
-    }
-
-    // Group test cases by featureModule
-    const grouped: Record<string, typeof testCases> = {};
-    for (const tc of testCases) {
-      const key = tc.featureModule;
-      if (!grouped[key]) grouped[key] = [];
-      grouped[key].push(tc);
-    }
-
-    // Build prompt
-    const prompt = buildAutomationPrompt(tool, name, grouped, description, baseUrl, pageContext);
-
-    // Call AI (via the shared provider — inherits its data.error/empty-content
-    // validation and finish_reason tracking instead of a second, drifted copy)
-    let script = '';
-    let usedFallback = false;
-    let truncated = false;
-    try {
-      const aiProvider = createAIProvider();
-      // NINE_ROUTER_TIMEOUT exists to stay under Vercel's maxDuration in
-      // production — that constraint doesn't exist for a local `npm run dev`
-      // server, so give it a much longer budget there instead of aborting a
-      // real (if slow) AI response.
-      const timeoutMs = process.env.VERCEL
-        ? parseInt(process.env.NINE_ROUTER_TIMEOUT || '45000', 10)
-        : 120_000;
-      const result = await aiProvider.generateAutomationScript(getSystemPrompt(tool), prompt, timeoutMs);
-      if (result.truncated) {
-        // A truncated response is likely incomplete/syntactically broken —
-        // treat it the same as an AI failure (fall back to the deterministic
-        // template) rather than silently persisting broken code as a success.
-        truncated = true;
-        throw new Error('AI response was truncated (hit max_tokens)');
-      }
-      script = result.script;
-    } catch (aiErr) {
-      console.warn('[Automation] AI failed, using fallback template:', aiErr);
-      script = generateFallbackScript(tool, name, grouped, baseUrl);
-      usedFallback = true;
-    }
-
-    // Save to DB
-    const automationScript = await prisma.automationScript.create({
-      data: {
-        projectId,
-        name,
-        description,
-        script,
-        status: 'Generated',
-        tool,
-        generationSource: usedFallback ? 'fallback' : 'ai',
-        testCaseIds: JSON.stringify(testCases.map(tc => tc.id)),
-      },
-    });
-
-    // Update automation status on test cases — only upgrade test cases that
-    // aren't already 'Automated' (a manually-set, more deliberate signal than
-    // 'Generated'; regenerating a script shouldn't silently downgrade it).
-    await prisma.testCase.updateMany({
-      where: { id: { in: testCases.map(tc => tc.id) }, automationStatus: 'Not Automated' },
-      data: { automationStatus: 'Generated' },
-    });
-
-    return res.json({ success: true, script: automationScript, tool, truncated });
+    const result = await runGenerateAutomation(parseResult.data);
+    return res.json({ success: true, ...result });
   } catch (err) {
     console.error('[Automation Generate]', err);
-    return res.status(500).json({ success: false, error: (err as Error).message });
+    const status = err instanceof HttpError ? err.status : 500;
+    return res.status(status).json({ success: false, error: (err as Error).message });
   }
 });
 

@@ -2,12 +2,14 @@ import './env';
 import express from 'express';
 import cors from 'cors';
 
+import { prisma } from './lib/prisma';
 import aiRoutes from './routes/ai';
 import excelRoutes from './routes/excel';
 import projectRoutes from './routes/projects';
 import testCasesRoutes from './routes/test-cases';
 import automationRoutes from './routes/automation';
 import pagesRoutes from './routes/pages';
+import jobsRoutes from './routes/jobs';
 import usersRoutes from './routes/users';
 import { requireAuth } from './middleware/auth';
 
@@ -38,6 +40,7 @@ app.use('/api/projects', projectRoutes);
 app.use('/api/test-cases', testCasesRoutes);
 app.use('/api/automation', automationRoutes);
 app.use('/api/pages', pagesRoutes);
+app.use('/api/jobs', jobsRoutes);
 app.use('/api/users', usersRoutes);
 
 // Global error handler
@@ -52,9 +55,21 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 // Vercel invokes the exported app as a request handler directly; it never
 // needs (or wants) a bound listener inside the serverless function.
 if (!process.env.VERCEL && process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`✓ Server running on http://localhost:${PORT}`);
   });
+
+  // Release the Supabase pooler connections cleanly on every dev-server
+  // restart (`tsx watch` sends SIGTERM to the old process on each file save)
+  // — without this, connections can sit around longer than necessary on the
+  // pooler's side across many restarts in a long session, eating into its
+  // connection limit for no reason.
+  const shutdown = () => {
+    server.close();
+    prisma.$disconnect().finally(() => process.exit(0));
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 }
 
 export default app;

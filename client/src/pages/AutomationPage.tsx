@@ -147,6 +147,11 @@ export function AutomationPage() {
       if (controller.signal.aborted) return;
       onToast('error', 'Failed to generate script', (err as Error).message);
     } finally {
+      // Skipping setGenerating(false) here on abort relies on this component
+      // having already been unmounted by ProjectScopeLayout's `key={project.id}`
+      // remount (see the effect above) — if that remount is ever removed,
+      // `generating` would get stuck `true` on a still-visible instance after
+      // a project switch mid-generate. Re-check this if that changes.
       if (!controller.signal.aborted) setGenerating(false);
     }
   };

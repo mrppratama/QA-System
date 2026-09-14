@@ -102,6 +102,22 @@ model Page {
   @@index([projectId])
 }
 
+// Tracks a long-running AI generation request (test case or automation
+// script) that's kicked off via a fast POST /api/jobs and polled via
+// GET /api/jobs/:id — decouples the client's HTTP wait from the AI call's
+// actual (unpredictable, sometimes 60s+) duration.
+model GenerationJob {
+  id        String   @id @default(cuid())
+  type      String   // 'test-case' | 'automation'
+  status    String   @default("pending") // pending | processing | completed | failed
+  input     String   // JSON — the original request payload
+  result    String?  // JSON — set once status is 'completed'
+  error     String?  // set once status is 'failed'
+  projectId String?  // informational only, no FK — jobs are ephemeral
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model ExcelFile {
   id           String   @id @default(cuid())
   originalName String
