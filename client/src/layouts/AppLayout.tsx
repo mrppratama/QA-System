@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { NavLink, Outlet, useMatch, useNavigate } from 'react-router-dom';
 import { ProjectModal } from '../components/ProjectModal';
+import { CustomSelect } from '../components/CustomSelect';
 import { Toast, useToast } from '../components/Toast';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -10,7 +11,7 @@ import type { AppShellContext } from './appShellTypes';
 const ACTIVE_PROJECT_KEY = 'qa_active_project_id';
 
 interface NavItem {
-  id: 'dashboard' | 'generate' | 'test-cases' | 'automation' | 'projects';
+  id: 'dashboard' | 'overview' | 'generate' | 'test-cases' | 'automation' | 'projects';
   label: string;
   icon: React.ReactNode;
   projectScoped: boolean;
@@ -28,8 +29,18 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    id: 'overview',
+    label: 'Pages & Scan',
+    projectScoped: true,
+    icon: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+      </svg>
+    ),
+  },
+  {
     id: 'generate',
-    label: 'Generate',
+    label: 'Generate Test Case',
     projectScoped: true,
     icon: (
       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -116,8 +127,8 @@ export function AppLayout() {
   const currentLabel =
     matchDashboard ? 'Dashboard' :
     matchProjects ? 'Projects' :
-    matchOverview ? 'Overview' :
-    matchGenerate ? 'Generate' :
+    matchOverview ? 'Pages & Scan' :
+    matchGenerate ? 'Generate Test Case' :
     matchTestCases ? 'Test Cases' :
     matchAutomation ? 'Automation' :
     '';
@@ -184,59 +195,87 @@ export function AppLayout() {
   const hrefFor = (item: NavItem): string | null => {
     if (!item.projectScoped) return `/${item.id}`;
     if (!linkSlug) return null;
+    if (item.id === 'overview') return `/projects/${linkSlug}`;
     return `/projects/${linkSlug}/${item.id}`;
   };
 
   return (
-    <div className="h-screen bg-gray-50 flex overflow-hidden">
+    <div className="h-screen bg-[#f8fafb] flex overflow-hidden">
 
       {/* ── Sidebar ── */}
       <>
         {/* Mobile overlay */}
         {sidebarOpen && (
           <div
-            className="fixed inset-0 bg-black/30 z-40 md:hidden"
+            className="fixed inset-0 bg-slate-900/25 backdrop-blur-[1px] z-40 md:hidden"
             onClick={() => setSidebarOpen(false)}
           />
         )}
 
         <aside className={`
           fixed inset-y-0 left-0 z-50 flex flex-col
-          bg-gray-950 text-white w-56
+          bg-white border-r border-slate-200/80 text-slate-700 w-60
           transition-transform duration-200
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
           md:relative md:translate-x-0 md:flex-shrink-0
         `}>
-          {/* Logo */}
-          <div className="h-14 flex items-center gap-2.5 px-4 border-b border-white/10 flex-shrink-0">
-            <div className="w-7 h-7 bg-blue-500 rounded-lg flex items-center justify-center flex-shrink-0">
+          {/* Logo / App Name */}
+          <div className="h-14 flex items-center gap-2.5 px-4 border-b border-slate-100 flex-shrink-0">
+            <div className="w-7 h-7 bg-[#0abab5] rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm shadow-[#0abab5]/20">
               <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
               </svg>
             </div>
-            <div>
-              <p className="text-sm font-bold leading-tight">QA Generator</p>
-              <p className="text-[10px] text-white/40 leading-tight">Powered by AI</p>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-slate-900 leading-tight tracking-tight">JomTesting</p>
+              <p className="text-[11px] text-slate-400 leading-tight">QA Studio</p>
             </div>
           </div>
 
-          {/* Nav */}
-          <nav className="flex-1 px-2 py-4 space-y-0.5 overflow-y-auto">
+          {/* Project Filter / Switcher — langsung di bawah nama aplikasi, di atas menu sidebar */}
+          <div className="px-3 pt-3 pb-3 border-b border-slate-100 bg-slate-50/50 flex-shrink-0">
+            <div className="flex items-center justify-between mb-1.5 px-1">
+              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                Project Aktif
+              </span>
+            </div>
+            <CustomSelect
+              size="sm"
+              value={activeProjectId}
+              placeholder="— Belum ada project —"
+              options={projects.map(p => ({
+                value: p.id,
+                label: p.name,
+                dotColor: '#0ABAB5',
+              }))}
+              onChange={selectedId => {
+                const proj = projects.find(p => p.id === selectedId);
+                if (!proj) return;
+                handleActiveProjectChange(proj.id);
+                if (currentProjectSegment !== null) {
+                  navigate(currentProjectSegment ? `/projects/${proj.slug}/${currentProjectSegment}` : `/projects/${proj.slug}`);
+                }
+              }}
+            />
+          </div>
+
+          {/* Nav Menu */}
+          <nav className="flex-1 px-2.5 py-3 space-y-0.5 overflow-y-auto">
             {NAV_ITEMS.map(item => {
               const href = hrefFor(item);
               const baseClasses = `
-                w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
-                transition-all duration-150 text-left
+                w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium
+                transition-colors duration-150 text-left
               `;
 
               if (!href) {
                 return (
                   <span
                     key={item.id}
-                    className={`${baseClasses} text-white/25 cursor-not-allowed`}
-                    title="Create a project first"
+                    className={`${baseClasses} text-slate-300 cursor-not-allowed`}
+                    title="Buat project terlebih dahulu"
                   >
-                    <span className="text-white/20">{item.icon}</span>
+                    <span className="text-slate-300">{item.icon}</span>
                     {item.label}
                   </span>
                 );
@@ -246,19 +285,19 @@ export function AppLayout() {
                 <NavLink
                   key={item.id}
                   to={href}
-                  end={!item.projectScoped}
+                  end={!item.projectScoped || item.id === 'overview'}
                   onClick={() => setSidebarOpen(false)}
                   className={({ isActive }) => `${baseClasses} ${
                     isActive
-                      ? 'bg-blue-500/20 text-blue-300'
-                      : 'text-white/60 hover:text-white hover:bg-white/5'
+                      ? 'bg-[#f0fbfa] text-[#077d7a]'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                   }`}
                 >
                   {({ isActive }) => (
                     <>
-                      <span className={isActive ? 'text-blue-400' : 'text-white/40'}>{item.icon}</span>
-                      {item.label}
-                      {isActive && <span className="ml-auto w-1 h-4 bg-blue-400 rounded-full" />}
+                      <span className={isActive ? 'text-[#0abab5]' : 'text-slate-400'}>{item.icon}</span>
+                      <span>{item.label}</span>
+                      {isActive && <span className="ml-auto w-1.5 h-1.5 bg-[#0abab5] rounded-full" />}
                     </>
                   )}
                 </NavLink>
@@ -266,81 +305,51 @@ export function AppLayout() {
             })}
           </nav>
 
-          {/* Project switcher di sidebar — hanya untuk page yg butuh project */}
-          {needsProject && (
-            <div className="px-3 pb-4 border-t border-white/10 pt-3 flex-shrink-0">
-              <p className="text-[10px] font-semibold text-white/30 uppercase tracking-widest mb-2 px-1">Active Project</p>
-              <div className="relative">
-                <select
-                  value={activeProjectId}
-                  onChange={e => {
-                    const proj = projects.find(p => p.id === e.target.value);
-                    if (!proj) return;
-                    const segment = currentProjectSegment === null ? 'test-cases' : currentProjectSegment;
-                    navigate(segment ? `/projects/${proj.slug}/${segment}` : `/projects/${proj.slug}`);
-                  }}
-                  className="w-full appearance-none bg-white/5 border border-white/10 text-white text-xs rounded-lg px-3 py-2 pr-7
-                             focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500
-                             cursor-pointer"
-                >
-                  <option value="" className="bg-gray-900">— No project —</option>
-                  {projects.map(p => (
-                    <option key={p.id} value={p.id} className="bg-gray-900">{p.name}</option>
-                  ))}
-                </select>
-                <svg className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-white/40"
-                  fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
-                </svg>
-              </div>
-              <button
-                onClick={() => setShowProjectModal(true)}
-                className="mt-2 w-full text-xs text-blue-400 hover:text-blue-300 border border-blue-500/30
-                           hover:border-blue-400/50 rounded-lg py-1.5 transition-colors"
-              >
-                + New Project
-              </button>
-            </div>
-          )}
-
-          {/* Account / sign out */}
-          <div className="px-3 py-3 border-t border-white/10 flex-shrink-0">
+          {/* Account / User Info */}
+          <div className="px-3 py-3 border-t border-slate-100 bg-slate-50/40 flex-shrink-0">
             {editingName ? (
-              <div className="mb-2 space-y-1.5">
+              <div className="space-y-1.5">
                 <input
                   autoFocus
                   value={nameInput}
                   onChange={e => setNameInput(e.target.value)}
                   placeholder="Nama kamu"
-                  className="w-full bg-white/5 border border-white/10 text-white text-xs rounded-lg px-2 py-1.5
-                             focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full bg-white border border-slate-200 text-slate-800 text-xs rounded-lg px-2.5 py-1.5
+                             focus:outline-none focus:ring-2 focus:ring-[#0abab5]/20 focus:border-[#0abab5]"
                 />
                 <div className="flex gap-1.5">
                   <button
                     onClick={saveName}
                     disabled={savingName}
-                    className="flex-1 text-[11px] font-medium bg-blue-600 hover:bg-blue-700 text-white rounded py-1 disabled:opacity-50"
+                    className="flex-1 text-[11px] font-medium bg-[#0abab5] hover:bg-[#089e9a] text-white rounded-md py-1 disabled:opacity-50"
                   >
-                    {savingName ? 'Saving...' : 'Save'}
+                    {savingName ? 'Menyimpan...' : 'Simpan'}
                   </button>
                   <button
                     onClick={() => setEditingName(false)}
-                    className="flex-1 text-[11px] text-white/60 hover:text-white border border-white/10 rounded py-1"
+                    className="flex-1 text-[11px] text-slate-600 hover:text-slate-900 bg-white border border-slate-200 rounded-md py-1"
                   >
-                    Cancel
+                    Batal
                   </button>
                 </div>
               </div>
             ) : (
-              <div className="flex items-center justify-between gap-1 mb-1.5">
-                <div className="min-w-0">
-                  <p className="text-xs text-white/80 truncate font-medium">{displayName || session?.user.email}</p>
-                  {displayName && <p className="text-[10px] text-white/30 truncate">{session?.user.email}</p>}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-7 h-7 rounded-full bg-[#d7f6f4] text-[#077d7a] flex items-center justify-center text-xs font-semibold flex-shrink-0">
+                    {(displayName || session?.user.email || 'U').charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-slate-800 truncate font-medium">
+                      {displayName || session?.user.email}
+                    </p>
+                    <p className="text-[10px] text-slate-400 truncate">Local Workspace</p>
+                  </div>
                 </div>
                 <button
                   onClick={startEditName}
-                  className="flex-shrink-0 text-white/30 hover:text-white/70 p-1"
-                  title="Edit nama"
+                  className="flex-shrink-0 text-slate-400 hover:text-slate-700 p-1 rounded hover:bg-slate-100"
+                  title="Ubah nama tester"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -348,13 +357,6 @@ export function AppLayout() {
                 </button>
               </div>
             )}
-            <button
-              onClick={() => signOut()}
-              className="w-full text-xs text-white/60 hover:text-white border border-white/10
-                         hover:border-white/20 rounded-lg py-1.5 transition-colors"
-            >
-              Sign Out
-            </button>
           </div>
         </aside>
       </>
@@ -363,10 +365,10 @@ export function AppLayout() {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
 
         {/* Top bar */}
-        <header className="h-14 bg-white border-b border-gray-200 flex items-center gap-3 px-4 sm:px-6 flex-shrink-0">
+        <header className="h-14 bg-white/90 backdrop-blur-sm border-b border-slate-200/80 flex items-center gap-3 px-4 sm:px-6 flex-shrink-0">
           {/* Mobile hamburger */}
           <button
-            className="md:hidden p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
+            className="md:hidden p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg"
             onClick={() => setSidebarOpen(true)}
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -375,16 +377,19 @@ export function AppLayout() {
           </button>
 
           {/* Page title */}
-          <div className="flex-1 min-w-0">
-            <h1 className="text-sm font-semibold text-gray-900 truncate">
+          <div className="flex items-center gap-2 min-w-0">
+            <h1 className="text-sm font-semibold text-slate-800 truncate">
               {currentLabel}
             </h1>
             {needsProject && activeProjectForHeader && (
-              <p className="text-xs text-gray-400 truncate leading-tight">{activeProjectForHeader.name}</p>
+              <>
+                <span className="text-slate-300 text-xs">/</span>
+                <span className="text-xs font-medium text-[#077d7a] bg-[#f0fbfa] border border-[#b0ece8] px-2 py-0.5 rounded-md truncate">
+                  {activeProjectForHeader.name}
+                </span>
+              </>
             )}
           </div>
-
-          {/* Right side: nothing needed, project is in sidebar */}
         </header>
 
         {/* Page content */}

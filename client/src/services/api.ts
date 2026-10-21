@@ -9,6 +9,7 @@ import type {
   Project,
   TestCase,
   AutomationScript,
+  AutomationRunSummary,
   AttentionItem,
   Page,
 } from '../types';
@@ -280,11 +281,11 @@ export const api = {
     return request(`/pages?projectId=${projectId}`);
   },
 
-  async createPage(data: { projectId: string; name: string; path?: string; description?: string; requiresAuth?: boolean }): Promise<{ success: boolean; page: Page }> {
+  async createPage(data: { projectId: string; name: string; path?: string; description?: string | null; requiresAuth?: boolean }): Promise<{ success: boolean; page: Page }> {
     return request('/pages', { method: 'POST', body: JSON.stringify(data) });
   },
 
-  async updatePage(id: string, data: { name?: string; path?: string; description?: string; requiresAuth?: boolean }): Promise<{ success: boolean; page: Page }> {
+  async updatePage(id: string, data: { name?: string; path?: string; description?: string | null; requiresAuth?: boolean }): Promise<{ success: boolean; page: Page }> {
     return request(`/pages/${id}`, { method: 'PUT', body: JSON.stringify(data) });
   },
 
@@ -292,8 +293,14 @@ export const api = {
     return request(`/pages/${id}`, { method: 'DELETE' });
   },
 
-  async scanPage(id: string): Promise<{ success: boolean }> {
-    return request(`/pages/${id}/scan`, { method: 'POST' });
+  async scanPage(
+    id: string,
+    options?: { username?: string; password?: string; loginPath?: string; showBrowser?: boolean }
+  ): Promise<{ success: boolean; page: Page; scannedCount?: number }> {
+    return request(`/pages/${id}/scan`, {
+      method: 'POST',
+      body: JSON.stringify(options || {}),
+    });
   },
 
   /** @deprecated use generateAutomation */
@@ -329,6 +336,40 @@ export const api = {
 
   async deleteAutomationScript(id: string): Promise<{ success: boolean; updatedTestCaseCount?: number }> {
     return request(`/automation/${id}`, { method: 'DELETE' });
+  },
+
+  async runAutomationScript(
+    id: string,
+    options?: { headless?: boolean; script?: string; testedBy?: string }
+  ): Promise<{
+    success: boolean;
+    summary: AutomationRunSummary;
+    updatedTestCaseCount: number;
+    script: AutomationScript;
+  }> {
+    return request(`/automation/${id}/run`, {
+      method: 'POST',
+      body: JSON.stringify(options || {}),
+    });
+  },
+
+  async runDirectAutomation(data: {
+    projectId: string;
+    featureModules: string[];
+    pageId?: string;
+    headless?: boolean;
+    forceRegenerate?: boolean;
+    testedBy?: string;
+  }): Promise<{
+    success: boolean;
+    summary: AutomationRunSummary;
+    updatedTestCaseCount: number;
+    script: AutomationScript;
+  }> {
+    return request('/automation/run-direct', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   },
 
   // === EXCEL ===

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Project } from '../types';
 import { api } from '../services/api';
@@ -9,6 +9,7 @@ export function ProjectsPage() {
   const { projects, activeProjectId, onProjectsChange, onActiveProjectChange, onToast } = useAppShellContext();
   const navigate = useNavigate();
 
+  const [searchQuery, setSearchQuery] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -18,6 +19,16 @@ export function ProjectsPage() {
   const [urlError, setUrlError] = useState('');
   const [loading, setLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+
+  const filteredProjects = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter(p =>
+      p.name.toLowerCase().includes(q) ||
+      (p.description && p.description.toLowerCase().includes(q)) ||
+      (p.projectUrl && p.projectUrl.toLowerCase().includes(q))
+    );
+  }, [projects, searchQuery]);
 
   const openCreate = () => {
     setFormName('');
@@ -52,8 +63,8 @@ export function ProjectsPage() {
     try {
       const payload = {
         name: formName.trim(),
-        description: formDesc.trim() || undefined,
-        projectUrl: formUrl.trim() || undefined,
+        description: formDesc.trim(),
+        projectUrl: formUrl.trim(),
       };
       if (editingId) {
         const res = await api.updateProject(editingId, payload);
@@ -95,18 +106,67 @@ export function ProjectsPage() {
   const projectToDelete = projects.find(p => p.id === deleteId);
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900">Projects</h2>
-          <p className="text-sm text-gray-500 mt-0.5">{projects.length} project{projects.length !== 1 ? 's' : ''}</p>
+    <div className="space-y-5">
+      {/* Header Card */}
+      <div className="card p-4 flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-[#f0fbfa] border border-[#b0ece8] flex items-center justify-center text-[#089e9a] flex-shrink-0">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+            </svg>
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-sm font-semibold text-gray-900">Projects</h2>
+              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-[#e6f9f8] text-[#06807d] border border-[#b0ece8]">
+                {projects.length} Project
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Kelola daftar project aplikasi yang diuji, konfigurasi URL target, dan pilih ruang kerja aktif.
+            </p>
+          </div>
         </div>
-        <button onClick={openCreate} className="btn-primary flex items-center gap-2">
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          New Project
-        </button>
+
+        <div className="flex items-center gap-2.5 flex-wrap w-full sm:w-auto">
+          {/* Search Input */}
+          <div className="relative flex-1 sm:w-64 min-w-[200px]">
+            <svg
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Cari nama project, deskripsi, URL..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full pl-8 pr-7 py-1.5 text-xs bg-gray-50 border border-gray-200 rounded-lg
+                         focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 focus:bg-white
+                         placeholder-gray-400 transition"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs"
+                title="Bersihkan pencarian"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          <button onClick={openCreate} className="btn-primary text-xs flex items-center gap-1.5 flex-shrink-0">
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            New Project
+          </button>
+        </div>
       </div>
 
       {/* Project list */}
@@ -121,14 +181,30 @@ export function ProjectsPage() {
             Create First Project
           </button>
         </div>
+      ) : filteredProjects.length === 0 ? (
+        <div className="card p-12 flex flex-col items-center text-center text-gray-400">
+          <svg className="w-11 h-11 mb-3 text-gray-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <p className="text-sm font-medium text-gray-600">Project tidak ditemukan</p>
+          <p className="text-xs text-gray-400 mt-1">
+            Tidak ada project yang cocok dengan kata kunci <strong>"{searchQuery}"</strong>
+          </p>
+          <button
+            onClick={() => setSearchQuery('')}
+            className="mt-3 btn-secondary text-xs"
+          >
+            Reset Pencarian
+          </button>
+        </div>
       ) : (
         <div className="space-y-3">
-          {projects.map(project => {
+          {filteredProjects.map(project => {
             const isActive = project.id === activeProjectId;
             return (
               <div
                 key={project.id}
-                className={`card p-4 flex items-start gap-4 cursor-pointer ${isActive ? 'border-blue-300 bg-blue-50/30' : ''}`}
+                className={`card p-4 flex items-start gap-4 cursor-pointer transition-colors ${isActive ? 'border-blue-300 bg-blue-50/30' : 'hover:border-gray-300'}`}
                 onClick={() => navigate(`/projects/${project.slug}`)}
               >
                 {/* Icon */}

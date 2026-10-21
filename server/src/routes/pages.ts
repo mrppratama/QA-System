@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { z } from 'zod';
+import { scanPageElementsLocal } from '../services/runner/automation-runner';
 
 const router = Router();
 
@@ -8,14 +9,14 @@ const CreatePageSchema = z.object({
   projectId: z.string().min(1),
   name: z.string().min(1),
   path: z.string().min(1).optional(),
-  description: z.string().optional(),
+  description: z.string().nullable().optional().transform(v => (v && v.trim() !== '' ? v.trim() : null)),
   requiresAuth: z.boolean().optional(),
 });
 
 const UpdatePageSchema = z.object({
   name: z.string().min(1).optional(),
   path: z.string().min(1).optional(),
-  description: z.string().optional(),
+  description: z.string().nullable().optional().transform(v => (v && v.trim() !== '' ? v.trim() : null)),
   requiresAuth: z.boolean().optional(),
 });
 
@@ -87,28 +88,61 @@ router.delete('/:id', async (req: Request, res: Response) => {
   }
 });
 
+const ScanPageSchema = z.object({
+  username: z.string().optional(),
+  password: z.string().optional(),
+  loginPath: z.string().optional(),
+  showBrowser: z.boolean().optional(),
+});
+
 // POST /api/pages/:id/scan
-// Not wired up to a real hosted-browser API yet — this is deliberately a
-// clear, honest stub rather than a fake success. Plug a real client in here
-// (e.g. via SCRAPER_API_KEY / SCRAPER_WS_ENDPOINT env vars, connecting with
-// playwright-core/puppeteer-core to a service like Browserless/Browserbase)
-// when that's actually set up.
 router.post('/:id/scan', async (req: Request, res: Response) => {
   try {
     const page = await prisma.page.findUnique({ where: { id: req.params.id }, include: { project: true } });
     if (!page) return res.status(404).json({ success: false, error: 'Page not found' });
 
-    if (page.requiresAuth) {
-      return res.status(501).json({
-        success: false,
-        error: 'Halaman yang butuh login belum didukung untuk scan otomatis. Isi deskripsi/elemen secara manual dulu.',
-      });
-    }
-
     if (!page.project.projectUrl) {
       return res.status(400).json({
         success: false,
         error: 'Project URL belum diisi. Isi dulu di halaman Projects sebelum scan halaman ini.',
+      });
+    }
+
+    const scanOpts = ScanPageSchema.safeParse(req.body || {});
+    const { username, password, loginPath, showBrowser } = scanOpts.success ? scanOpts.data : {};
+
+    if (page.requiresAuth && (!username || !password)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Halaman ini butuh login. Masukkan Username/Email dan Password untuk melakukan scan.',
+      });
+    }
+
+    // When running locally, use local Playwright/Chrome scanner directly
+    if (!process.env.VERCEL && process.env.NODE_ENV !== 'test') {
+      const base = page.project.projectUrl.endsWith('/') ? page.project.projectUrl : `${page.project.projectUrl}/`;
+      const targetUrl = new URL(page.path || '/', base).toString();
+      const loginUrl = loginPath
+        ? /^https?:\/\//i.test(loginPath)
+          ? loginPath
+          : new URL(loginPath, base).toString()
+        : new URL('/login', base).toString();
+
+      const elements = await scanPageElementsLocal(targetUrl, 25000, {
+        ...(username && password ? { loginUrl, username, password } : {}),
+        headless: showBrowser === false ? true : false,
+      });
+      const updatedPage = await prisma.page.update({
+        where: { id: page.id },
+        data: {
+          elements: JSON.stringify(elements),
+          lastScannedAt: new Date(),
+        },
+      });
+      return res.json({
+        success: true,
+        page: updatedPage,
+        scannedCount: elements.length,
       });
     }
 

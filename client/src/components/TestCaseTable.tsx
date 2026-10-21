@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { GeneratedTestCase } from '../types';
 import { TEST_CASE_TYPES } from '../types';
+import { CustomSelect } from './CustomSelect';
 
 interface TestCaseTableProps {
   testCases: GeneratedTestCase[];
@@ -71,9 +72,12 @@ function EditModal({ tc, index, onSave, onDelete, onClose }: EditModalProps) {
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">Type</label>
-              <select className="input-field" value={form.type} onChange={set('type')}>
-                {TEST_CASE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
+              <CustomSelect
+                size="sm"
+                value={form.type}
+                onChange={val => setForm(prev => ({ ...prev, type: val }))}
+                options={TEST_CASE_TYPES.map(t => ({ value: t, label: t }))}
+              />
             </div>
           </div>
 
@@ -111,12 +115,17 @@ function EditModal({ tc, index, onSave, onDelete, onClose }: EditModalProps) {
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">Testing Result</label>
-              <select className="input-field" value={form.testingResult ?? 'Not Tested'} onChange={set('testingResult')}>
-                <option value="Not Tested">Not Tested</option>
-                <option value="Passed">Passed</option>
-                <option value="Failed">Failed</option>
-                <option value="Blocked">Blocked</option>
-              </select>
+              <CustomSelect
+                size="sm"
+                value={form.testingResult ?? 'Not Tested'}
+                onChange={val => setForm(prev => ({ ...prev, testingResult: val }))}
+                options={[
+                  { value: 'Not Tested', label: 'Not Tested', dotColor: '#94a3b8' },
+                  { value: 'Passed', label: 'Passed', dotColor: '#10b981' },
+                  { value: 'Failed', label: 'Failed', dotColor: '#ef4444' },
+                  { value: 'Blocked', label: 'Blocked', dotColor: '#f59e0b' },
+                ]}
+              />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">Test Date</label>
@@ -245,8 +254,8 @@ export function TestCaseTable({ testCases, onChange, selectedIds, onSelectionCha
             {THEAD.map((h, i) => <col key={i} style={{ width: h.w }} />)}
           </colgroup>
           <thead>
-            <tr>
-              <th className="px-2 py-2.5 text-center bg-gray-900">
+            <tr className="border-b border-slate-200">
+              <th className="px-2 py-2.5 text-center bg-slate-50">
                 <input
                   type="checkbox"
                   className="rounded"
@@ -258,10 +267,10 @@ export function TestCaseTable({ testCases, onChange, selectedIds, onSelectionCha
               {THEAD.map((h, i) => (
                 <th
                   key={i}
-                  className={`px-2 py-2.5 text-left text-xs font-medium whitespace-nowrap ${h.manual ? 'bg-gray-800 text-gray-300' : 'bg-gray-900 text-white'}`}
+                  className={`px-2 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider whitespace-nowrap ${h.manual ? 'bg-amber-50/70 text-amber-800' : 'bg-slate-50 text-slate-500'}`}
                 >
                   {h.label}
-                  {h.manual && <span className="ml-1 text-gray-500 text-[10px] font-normal">manual</span>}
+                  {h.manual && <span className="ml-1 text-amber-600/80 text-[10px] font-normal lowercase">(manual)</span>}
                 </th>
               ))}
             </tr>

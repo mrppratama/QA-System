@@ -28,7 +28,7 @@ export class NineRouterProvider implements AIProvider {
   }
 
   private buildPrompt(input: TestCaseInput): string {
-    const count = input.count || 20;
+    const hasExplicitCount = typeof input.count === 'number' && input.count > 0;
     const hasCredentials = input.username || input.password;
     const credentialInfo = hasCredentials
       ? `\nLOGIN CREDENTIALS (use in testData for scenarios that require login):\n${input.username ? `  Username: ${input.username}` : ''}\n${input.password ? `  Password: ${input.password}` : ''}`
@@ -38,21 +38,49 @@ export class NineRouterProvider implements AIProvider {
       ? `\nAPPLICATION URL: ${input.projectUrl} (use this as the base when referencing specific pages/paths in action steps)`
       : '';
 
-    return `You are a professional QA engineer. Generate ${count} MANUAL test cases (not automation scripts) for the following feature.
+    const pageElementsList =
+      input.pageContext?.elements && input.pageContext.elements.length > 0
+        ? input.pageContext.elements
+            .map(e => `  - <${e.tag || 'el'}> ${e.selector}${e.role || e.text ? `  →  ${[e.role, e.text].filter(Boolean).join(':')}` : ''}`)
+            .join('\n')
+        : '';
+
+    const pageContextBlock = input.pageContext
+      ? `\nSCRAPED PAGE CONTEXT (${input.pageContext.name}, path: ${input.pageContext.path}):\n${
+          input.pageContext.description ? `Page Description: ${input.pageContext.description}\n` : ''
+        }${
+          pageElementsList
+            ? `Real UI Elements & Selectors scraped from this page (use these exact labels/controls/selectors in your test scenarios, action steps, and test data so they can be directly converted to automation scripts):\n${pageElementsList}`
+            : ''
+        }`
+      : '';
+
+    const countHeader = hasExplicitCount
+      ? `Generate ${input.count} MANUAL test cases (not automation scripts) for the following feature.`
+      : `Generate a comprehensive set of MANUAL test cases (not automation scripts) for the following feature. Determine the number of test cases naturally based on the actual scope, flows, and scraped elements of the page/feature.`;
+
+    const countRequirement = hasExplicitCount
+      ? `- Generate exactly ${input.count} test cases`
+      : `- Generate as many test cases as genuinely needed to cover all real scenarios and scraped UI elements of this feature thoroughly`;
+
+    return `Anda adalah QA Engineer profesional. ${countHeader}
 
 FEATURE: ${input.feature}
 ${input.description ? `DESCRIPTION: ${input.description}` : ''}
 ${input.userFlow ? `USER FLOW: ${input.userFlow}` : ''}
 ${input.expectedResult ? `EXPECTED RESULT: ${input.expectedResult}` : ''}
-${input.role ? `ROLE / USER: ${input.role}` : ''}${urlContext}${credentialInfo}
+${input.role ? `ROLE / USER: ${input.role}` : ''}${urlContext}${credentialInfo}${pageContextBlock}
 
 Requirements:
-- Generate exactly ${count} test cases
+${countRequirement}
 - Categorize each test case strictly into one of these 4 types: "Happy Path", "Validation", "Error Case", "Important edge case"
+- WAJIB BAHASA INDONESIA: Seluruh narasi pada field "testScenario", "precondition", "actionStep", dan "expectedResult" HARUS ditulis dalam Bahasa Indonesia yang jelas dan natural (jangan gunakan bahasa Inggris untuk narasi).
+- KECUALI Nilai State/Dropdown: Field "type" WAJIB tetap menggunakan salah satu dari 4 nilai bahasa Inggris di atas persis ("Happy Path", "Validation", "Error Case", "Important edge case"). Jangan terjemahkan nilai field "type".
 - Ensure a good mix of these 4 test case types
 - Do NOT invent business rules not mentioned above
 - Do NOT generate test cases unrelated to the feature
-- Each action step should be numbered (e.g. "1. Open page\n2. Click button")
+- Each action step should be numbered in Bahasa Indonesia (e.g. "1. Buka halaman ...\n2. Klik tombol ...")
+${pageElementsList ? `- Reference the actual UI labels/selectors from SCRAPED PAGE CONTEXT in actionStep (e.g. quote the button text or mention the selector/field name) so downstream automation conversion can map them directly` : ''}
 ${hasCredentials ? `- For test cases that require login, include the actual credentials in the testData field (e.g. "Username: ${input.username || 'user'}\\nPassword: ${input.password || 'pass'}")` : ''}
 - For negative/invalid test cases, use wrong credentials or edge case values in testData
 - testData must be specific and useful (not just '-' unless truly no data needed)
@@ -63,12 +91,12 @@ Return ONLY valid JSON in this exact format (no markdown, no explanation):
   "testCases": [
     {
       "featureModule": "${input.feature}",
-      "testScenario": "Clear description of what is being tested",
+      "testScenario": "Deskripsi skenario pengujian dalam Bahasa Indonesia",
       "type": "Happy Path|Validation|Error Case|Important edge case",
-      "precondition": "What needs to be true before the test",
-      "actionStep": "1. Step one\\n2. Step two\\n3. Step three",
+      "precondition": "Kondisi awal sebelum pengujian dalam Bahasa Indonesia",
+      "actionStep": "1. Langkah pertama dalam Bahasa Indonesia\\n2. Langkah kedua\\n3. Langkah ketiga",
       "testData": "Field: value\\nAnother field: another value (one field per line via \\n, never joined with |)",
-      "expectedResult": "What should happen"
+      "expectedResult": "Hasil yang diharapkan dalam Bahasa Indonesia"
     }
   ]
 }`;
@@ -76,7 +104,7 @@ Return ONLY valid JSON in this exact format (no markdown, no explanation):
 
   async generateTestCases(input: TestCaseInput, timeoutMs?: number): Promise<GenerateResult> {
     const { content } = await this.callChatCompletion(
-      'You are a professional QA engineer. Always return valid JSON only, no markdown formatting.',
+      'Anda adalah QA Engineer profesional. Selalu tulis skenario, precondition, langkah aksi (actionStep), dan expectedResult dalam Bahasa Indonesia (kecuali field "type" yang harus tetap berbahasa Inggris: Happy Path, Validation, Error Case, Important edge case). Kembalikan hanya JSON valid tanpa markdown.',
       this.buildPrompt(input),
       { timeoutMs, temperature: 0.3, maxTokens: 8000 }
     );

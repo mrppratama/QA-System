@@ -19,6 +19,31 @@ export async function runGenerateTestCases(input: GenerateInput) {
     } catch { /* non-fatal */ }
   }
 
+  // If pageId is provided, load the scraped Page context & elements so manual test cases
+  // are grounded in the actual scraped UI controls and selectors
+  let enrichedInput: Parameters<ReturnType<typeof createAIProvider>['generateTestCases']>[0] = { ...input };
+  if (input.pageId) {
+    try {
+      const page = await prisma.page.findUnique({ where: { id: input.pageId } });
+      if (page) {
+        let elements: Array<{ selector: string; tag?: string; role?: string; text?: string }> = [];
+        try {
+          const parsed = JSON.parse(page.elements || '[]');
+          if (Array.isArray(parsed)) elements = parsed;
+        } catch { /* ignore */ }
+        enrichedInput = {
+          ...enrichedInput,
+          pageContext: {
+            name: page.name,
+            path: page.path,
+            description: page.description,
+            elements,
+          },
+        };
+      }
+    } catch { /* non-fatal */ }
+  }
+
   const aiProvider = createAIProvider();
 
   let result;
@@ -45,7 +70,7 @@ export async function runGenerateTestCases(input: GenerateInput) {
       break;
     }
     try {
-      result = await aiProvider.generateTestCases(input, remaining);
+      result = await aiProvider.generateTestCases(enrichedInput, remaining);
       break;
     } catch (err) {
       lastError = err as Error;

@@ -1,3 +1,10 @@
+export interface PageElementContext {
+  selector: string;
+  tag?: string;
+  role?: string;
+  text?: string;
+}
+
 export interface TestCaseInput {
   feature: string;
   description?: string;
@@ -9,6 +16,13 @@ export interface TestCaseInput {
   password?: string;
   count?: number;
   projectUrl?: string;
+  pageId?: string;
+  pageContext?: {
+    name: string;
+    path: string;
+    description?: string | null;
+    elements: PageElementContext[];
+  };
 }
 
 export interface GeneratedTestCase {

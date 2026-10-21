@@ -45,8 +45,9 @@ export interface GenerateInput {
   testedBy?: string;
   username?: string;
   password?: string;
-  count: number;
+  count?: number;
   projectId?: string;
+  pageId?: string;
   projectUrl?: string;
 }
 
@@ -160,6 +161,24 @@ export interface AutomationScript {
   testCaseIds: string;
   createdAt: string;
   updatedAt?: string;
+}
+
+export interface SingleTestRunResult {
+  suite: string;
+  title: string;
+  testCaseId?: string;
+  status: 'passed' | 'failed' | 'skipped';
+  durationMs: number;
+  error?: string;
+}
+
+export interface AutomationRunSummary {
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  durationMs: number;
+  results: SingleTestRunResult[];
 }
 
 export interface Page {

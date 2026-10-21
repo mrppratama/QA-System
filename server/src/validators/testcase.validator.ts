@@ -23,8 +23,9 @@ export const GenerateInputSchema = z.object({
   testedBy: z.string().optional(),
   username: z.string().optional(),
   password: z.string().optional(),
-  count: z.number().int().min(1).max(100).default(20),
+  count: z.number().int().min(1).max(100).optional(),
   projectId: z.string().optional(),
+  pageId: z.string().optional(),
   projectUrl: z.string().url().optional().or(z.literal('')).transform(v => v || undefined),
 });
 

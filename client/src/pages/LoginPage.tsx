@@ -82,7 +82,7 @@ export function LoginPage() {
           ))}
         </ul>
 
-        <p className="relative z-10 text-xs text-blue-100/60">QA Generator © {new Date().getFullYear()}</p>
+        <p className="relative z-10 text-xs text-blue-100/60">JomTesting — QA Studio © {new Date().getFullYear()}</p>
       </div>
 
       {/* ── Right form panel ── */}
@@ -93,8 +93,8 @@ export function LoginPage() {
             <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center mb-3">
               <BrandMark className="w-5 h-5 text-white" />
             </div>
-            <h1 className="text-base font-bold text-gray-900">QA Generator</h1>
-            <p className="text-xs text-gray-400">Masuk untuk melanjutkan</p>
+            <h1 className="text-base font-bold text-gray-900">JomTesting</h1>
+            <p className="text-xs text-gray-400">QA Studio · Masuk untuk melanjutkan</p>
           </div>
 
           {/* Heading (desktop only, mirrors the branding side) */}

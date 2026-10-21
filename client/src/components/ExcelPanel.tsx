@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import type { SheetInfo, ColumnMapping, TestCase } from '../types';
 import { api } from '../services/api';
+import { CustomSelect } from './CustomSelect';
 
 interface ExcelPanelProps {
   testCases: TestCase[];
@@ -172,17 +173,16 @@ export function ExcelPanel({ testCases, onToast }: ExcelPanelProps) {
             <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">
               Select Sheet
             </label>
-            <select
-              className="input-field"
+            <CustomSelect
+              size="sm"
               value={selectedSheet}
-              onChange={e => setSelectedSheet(e.target.value)}
-            >
-              {sheets.map(s => (
-                <option key={s.name} value={s.name}>
-                  {s.name} ({s.rowCount} rows, {s.columnCount} cols)
-                </option>
-              ))}
-            </select>
+              onChange={setSelectedSheet}
+              options={sheets.map(s => ({
+                value: s.name,
+                label: s.name,
+                sublabel: `${s.rowCount} rows, ${s.columnCount} cols`,
+              }))}
+            />
           </div>
           <button onClick={handleSelectSheet} className="btn-primary w-full text-sm">
             Use This Sheet
@@ -208,16 +208,18 @@ export function ExcelPanel({ testCases, onToast }: ExcelPanelProps) {
                 <div key={key} className="flex items-center gap-2">
                   <span className="text-xs text-gray-600 w-28 flex-shrink-0">{label}</span>
                   <span className="text-gray-400 text-xs">→</span>
-                  <select
-                    className="flex-1 text-xs border border-gray-200 rounded px-1.5 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
-                    value={mapping[key] || ''}
-                    onChange={e => setMapping(prev => ({ ...prev, [key]: e.target.value || undefined }))}
-                  >
-                    <option value="">— skip —</option>
-                    {headers.map(h => (
-                      <option key={h} value={h}>{h}</option>
-                    ))}
-                  </select>
+                  <div className="flex-1 min-w-0">
+                    <CustomSelect
+                      size="xs"
+                      value={mapping[key] || ''}
+                      onChange={val => setMapping(prev => ({ ...prev, [key]: val || undefined }))}
+                      placeholder="— skip —"
+                      options={[
+                        { value: '', label: '— skip —' },
+                        ...headers.map(h => ({ value: h, label: h })),
+                      ]}
+                    />
+                  </div>
                 </div>
               ))}
             </div>

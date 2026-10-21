@@ -1,18 +1,29 @@
-import React, { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GenerateForm } from '../components/GenerateForm';
 import { GeneratingProgress } from '../components/GeneratingProgress';
 import { TestCaseTable } from '../components/TestCaseTable';
 import { api } from '../services/api';
 import { useProjectScopeContext } from '../hooks/useAppShellContext';
-import type { GeneratedTestCase, GenerateInput } from '../types';
+import type { GeneratedTestCase, GenerateInput, Page } from '../types';
 
 export function GeneratePage() {
   const { projects, activeProject: routeProject, onCreateProject, onToast } = useProjectScopeContext();
   const activeProjectId = routeProject.id;
   const navigate = useNavigate();
 
+  const [pages, setPages] = useState<Page[]>([]);
   const [generating, setGenerating] = useState(false);
+  const [generatingFeature, setGeneratingFeature] = useState<string>('');
+  const resultsRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!activeProjectId) return;
+    api.getPages(activeProjectId)
+      .then(res => setPages(res.pages))
+      .catch(() => setPages([]));
+  }, [activeProjectId]);
+
   const [testCases, setTestCases] = useState<GeneratedTestCase[]>([]);
   const [hasGenerated, setHasGenerated] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -23,9 +34,9 @@ export function GeneratePage() {
 
   const handleGenerate = useCallback(async (input: GenerateInput) => {
     setGenerating(true);
+    setGeneratingFeature(input.feature);
     setSelectedIds(new Set());
     try {
-      // Auto-inject projectUrl if active project has one
       const activeProject = projects.find(p => p.id === (input.projectId || activeProjectId));
       const enrichedInput: GenerateInput = activeProject?.projectUrl
         ? { ...input, projectUrl: activeProject.projectUrl }
@@ -41,16 +52,18 @@ export function GeneratePage() {
       setTestCases(res.testCases);
       setHasGenerated(true);
       setLastInput(input);
-      // Select all by default
       setSelectedIds(new Set(res.testCases.map(tc => tc.tempId)));
       onToast('success', `${res.count} test cases generated`, 'Review, edit, then Save Selected or Save All');
+      setTimeout(() => {
+        resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 150);
     } catch (err) {
       const msg = (err as Error).message;
       onToast('error', 'Generation failed', msg);
     } finally {
       setGenerating(false);
     }
-  }, [onToast]);
+  }, [projects, activeProjectId, onToast]);
 
   const handleSave = useCallback(async (mode: 'selected' | 'all') => {
     const toSave = mode === 'selected'
@@ -102,7 +115,6 @@ export function GeneratePage() {
     if (!testCases.length) return;
     setExporting(true);
     try {
-      // Convert GeneratedTestCase to TestCase format for export
       const tcForExport = testCases.map((tc, i) => ({
         id: `temp-${i}`,
         testCaseId: tc.tempId,
@@ -141,32 +153,79 @@ export function GeneratePage() {
   const activeProject = projects.find(p => p.id === (lastInput?.projectId || activeProjectId));
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      {/* Left: Generate Form */}
-      <div className="lg:col-span-1">
-        <div className="card p-5">
-          <h2 className="text-sm font-semibold text-gray-800 mb-4">Generate Test Cases</h2>
-          <GenerateForm
-            onGenerate={handleGenerate}
-            loading={generating}
-            projects={projects}
-            activeProjectId={activeProjectId}
-            onCreateProject={onCreateProject}
-          />
+    <div className="space-y-5">
+      {/* Header Card */}
+      <div className="card p-4 flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-[#f0fbfa] border border-[#b0ece8] flex items-center justify-center text-[#089e9a] flex-shrink-0">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-sm font-semibold text-gray-900">Generate Test Case</h2>
+              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-[#e6f9f8] text-[#06807d] border border-[#b0ece8]">
+                {routeProject.name}
+              </span>
+              {pages.length > 0 && (
+                <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                  {pages.length} Halaman Tersedia
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Pilih halaman hasil scan atau lengkapi detail fitur di bawah untuk menghasilkan skenario test case secara otomatis dengan AI.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => navigate(`/projects/${routeProject.slug}`)}
+            className="btn-secondary text-xs flex items-center gap-1.5"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+            </svg>
+            Pages &amp; Scan
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate(`/projects/${routeProject.slug}/test-cases`)}
+            className="btn-secondary text-xs flex items-center gap-1.5"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Lihat Test Cases
+          </button>
         </div>
       </div>
 
-      {/* Right: Results */}
-      <div className="lg:col-span-2 space-y-4">
-        {/* Progress */}
-        <GeneratingProgress visible={generating} />
+      {/* Wide Generate Form Card */}
+      <div className="card p-5">
+        <GenerateForm
+          onGenerate={handleGenerate}
+          loading={generating}
+          projects={projects}
+          pages={pages}
+          activeProjectId={activeProjectId}
+          onCreateProject={onCreateProject}
+        />
+      </div>
 
-        {/* Results */}
-        {hasGenerated && !generating && (
+      {/* Popup Modal Loading Progress */}
+      <GeneratingProgress visible={generating} featureName={generatingFeature} />
+
+      {/* Results Section */}
+      <div ref={resultsRef}>
+        {hasGenerated && (
           <div className="card p-5">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <div className="flex items-center gap-2">
-                <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="w-4 h-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
                 <h2 className="text-sm font-semibold text-gray-800">Generated Test Cases</h2>
@@ -231,7 +290,7 @@ export function GeneratePage() {
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              After saving, view and manage all test cases in the
+              Setelah disimpan, kelola seluruh test case di halaman
               <button
                 onClick={() => {
                   const proj = projects.find(p => p.id === (savedProjectId || activeProjectId));
@@ -241,20 +300,8 @@ export function GeneratePage() {
               >
                 Test Cases
               </button>
-              page.
+              .
             </div>
-          </div>
-        )}
-
-        {/* Empty state */}
-        {!hasGenerated && !generating && (
-          <div className="card p-12 flex flex-col items-center text-center text-gray-400">
-            <svg className="w-16 h-16 mb-4 text-gray-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            <p className="text-sm font-medium text-gray-500">No test cases yet</p>
-            <p className="text-xs mt-1 text-gray-400">Fill in the form on the left and click Generate</p>
-            <p className="text-xs mt-1 text-gray-400">Powered by 9Router AI</p>
           </div>
         )}
       </div>

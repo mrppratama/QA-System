@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import path from 'path';
+import fs from 'fs';
 import crypto from 'crypto';
 import { upload } from '../middleware/upload';
 import { ExcelService } from '../services/excel/excel.service';
@@ -9,9 +10,24 @@ import { z } from 'zod';
 
 const router = Router();
 const excelService = new ExcelService();
+const UPLOADS_DIR = path.resolve(__dirname, '../../../uploads');
 
-// Download Excel file Buffer from Supabase Storage
+function ensureUploadsDir() {
+  if (!fs.existsSync(UPLOADS_DIR)) {
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+  }
+}
+
+// Download Excel file Buffer from Local Disk or Supabase Storage
 async function getFileBuffer(fileRecord: { storedName: string }): Promise<Buffer | null> {
+  // Check local disk first
+  const localPath = path.join(UPLOADS_DIR, path.basename(fileRecord.storedName));
+  if (fs.existsSync(localPath)) {
+    try {
+      return fs.readFileSync(localPath);
+    } catch { /* ignore */ }
+  }
+
   if (supabase) {
     try {
       const { data, error } = await supabase.storage.from(BUCKET_NAME).download(fileRecord.storedName);
@@ -51,7 +67,7 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
     const storedName = `upload-${Date.now()}-${random}${ext}`;
 
     let storageOk = false;
-    if (supabase) {
+    if (supabase && process.env.LOCAL_MODE !== 'true') {
       try {
         const { error } = await supabase.storage.from(BUCKET_NAME).upload(storedName, fileBuffer, {
           contentType: req.file.mimetype || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -68,10 +84,10 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
     }
 
     if (!storageOk) {
-      return res.status(500).json({
-        success: false,
-        error: 'Storage unavailable. Supabase Storage is required.',
-      });
+      // Save locally to uploads/ directory
+      ensureUploadsDir();
+      fs.writeFileSync(path.join(UPLOADS_DIR, storedName), fileBuffer);
+      storageOk = true;
     }
 
     const excelFile = await prisma.excelFile.create({
@@ -223,7 +239,10 @@ router.post('/:id/add-test-cases', async (req: Request, res: Response) => {
       mapping
     );
 
-    if (supabase) {
+    ensureUploadsDir();
+    fs.writeFileSync(path.join(UPLOADS_DIR, path.basename(file.storedName)), result.buffer);
+
+    if (supabase && process.env.LOCAL_MODE !== 'true') {
       try {
         await supabase.storage.from(BUCKET_NAME).upload(file.storedName, result.buffer, {
           contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

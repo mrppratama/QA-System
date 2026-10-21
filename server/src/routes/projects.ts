@@ -7,14 +7,14 @@ const router = Router();
 
 const CreateProjectSchema = z.object({
   name: z.string().min(1).max(100),
-  description: z.string().max(500).optional(),
-  projectUrl: z.string().url('Invalid URL format').optional().or(z.literal('')).transform(v => v || null),
+  description: z.string().max(500).nullable().optional().transform(v => (v && v.trim() !== '' ? v.trim() : null)),
+  projectUrl: z.string().url('Invalid URL format').nullable().optional().or(z.literal('')).transform(v => v || null),
 });
 
 const UpdateProjectSchema = z.object({
   name: z.string().min(1).max(100).optional(),
-  description: z.string().max(500).optional(),
-  projectUrl: z.string().url('Invalid URL format').optional().or(z.literal('')).transform(v => v || null),
+  description: z.string().max(500).nullable().optional().transform(v => (v && v.trim() !== '' ? v.trim() : null)),
+  projectUrl: z.string().url('Invalid URL format').nullable().optional().or(z.literal('')).transform(v => v || null),
 });
 
 // GET /api/projects

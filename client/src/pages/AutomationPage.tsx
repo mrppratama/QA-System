@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import type { AutomationScript, AutomationTool, Page } from '../types';
-import { AUTOMATION_TOOLS } from '../types';
+import type { AutomationScript, AutomationRunSummary, Page } from '../types';
 import { api } from '../services/api';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { useProjectScopeContext } from '../hooks/useAppShellContext';
@@ -12,11 +11,13 @@ interface FeatureGroup {
   selected: boolean;
 }
 
-function parseTestCaseIds(raw: string): string[] {
+function countPageElements(raw: string | null | undefined): number {
+  if (!raw) return 0;
   try {
-    return JSON.parse(raw || '[]');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.length : 0;
   } catch {
-    return [];
+    return 0;
   }
 }
 
@@ -26,39 +27,50 @@ export function AutomationPage() {
   const navigate = useNavigate();
   const automationBasePath = `/projects/${activeProject.slug}/automation`;
 
-  const [localView, setLocalView] = useState<'list' | 'generate'>('list');
-  const [lastScriptId, setLastScriptId] = useState<string | null>(null);
   const [scripts, setScripts] = useState<AutomationScript[]>([]);
   const [features, setFeatures] = useState<FeatureGroup[]>([]);
-  const [selectedTool, setSelectedTool] = useState<AutomationTool>('cypress');
-  const [scriptName, setScriptName] = useState('');
-  const [scriptDesc, setScriptDesc] = useState('');
-  const [generating, setGenerating] = useState(false);
+  const [pages, setPages] = useState<Page[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // Live Browser Preview ON by default (just like page scraping)
+  const [showBrowser, setShowBrowser] = useState<boolean>(true);
+  const [runningFeatureKey, setRunningFeatureKey] = useState<string | null>(null);
+  const [runningScriptId, setRunningScriptId] = useState<string | null>(null);
+
+  // Optional code editor state when user clicks "Lihat Script"
   const [editedScript, setEditedScript] = useState('');
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
-  const [nameEditedManually, setNameEditedManually] = useState(false);
-  const [pages, setPages] = useState<Page[]>([]);
-  const [selectedPageId, setSelectedPageId] = useState<string>('');
-  const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
-  const generateAbortRef = useRef<AbortController | null>(null);
 
-  const view: 'list' | 'generate' | 'editor' = scriptId ? 'editor' : localView;
+  const [runReport, setRunReport] = useState<{
+    scriptId: string;
+    scriptName: string;
+    summary: AutomationRunSummary;
+    updatedTestCaseCount: number;
+  } | null>(null);
+
+  const view: 'runner' | 'editor' = scriptId ? 'editor' : 'runner';
   const activeScript = scriptId ? scripts.find(s => s.id === scriptId) ?? null : null;
 
-  // Resync the editor draft only when the OPEN script actually changes —
-  // not on every `scripts` update (e.g. status change) while editing.
+  // Fetch full script content when opening editor
   useEffect(() => {
-    if (activeScript) setEditedScript(activeScript.script);
+    if (!scriptId) return;
+    const found = scripts.find(s => s.id === scriptId);
+    if (found && typeof found.script === 'string') {
+      setEditedScript(found.script);
+      return;
+    }
+    api.getAutomationScript(scriptId)
+      .then(res => {
+        setScripts(prev => {
+          const exists = prev.some(s => s.id === res.script.id);
+          return exists ? prev.map(s => s.id === res.script.id ? res.script : s) : [res.script, ...prev];
+        });
+        setEditedScript(res.script.script || '');
+      })
+      .catch(err => onToast('error', 'Gagal memuat script', (err as Error).message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeScript?.id]);
-
-  // Keep the "Editor" tab visible when landing directly on an editor URL
-  // (deep link / refresh), not just when opened via a click this session.
-  useEffect(() => {
-    if (scriptId) setLastScriptId(scriptId);
   }, [scriptId]);
 
   const loadData = useCallback(async () => {
@@ -74,7 +86,7 @@ export function AutomationPage() {
       setFeatures(featRes.features.map(f => ({ ...f, selected: false })));
       setPages(pageRes.pages);
     } catch (err) {
-      onToast('error', 'Failed to load data', (err as Error).message);
+      onToast('error', 'Gagal memuat data automation', (err as Error).message);
     } finally {
       setLoading(false);
     }
@@ -82,28 +94,21 @@ export function AutomationPage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Cancel an in-flight generate request when the active project changes
-  // (ProjectScopeLayout remounts this page via `key={project.id}` on project
-  // switch, so this cleanup also covers unmount).
-  useEffect(() => {
-    return () => {
-      generateAbortRef.current?.abort();
-    };
-  }, [activeProject?.id]);
+  // Match a featureModule name to its scraped Page record
+  const findMatchingPage = useCallback((featureName: string): Page | undefined => {
+    const fn = featureName.toLowerCase().trim();
+    return pages.find(p => {
+      const pn = p.name.toLowerCase().trim();
+      const pp = p.path.replace(/^\/+/, '').toLowerCase().trim();
+      return fn === pn || (pn.length >= 3 && (fn.includes(pn) || pn.includes(fn))) || (pp.length >= 3 && fn === pp);
+    });
+  }, [pages]);
 
-  // Auto-fill script name based on selected features — but never clobber a
-  // name the user has manually typed. Clearing the field back to empty is
-  // the explicit "give control back to auto-fill" gesture.
-  useEffect(() => {
-    if (nameEditedManually) return;
-    const selected = features.filter(f => f.selected);
-    if (selected.length === 0) { setScriptName(''); return; }
-    if (selected.length === 1) {
-      setScriptName(selected[0].featureModule + ' Tests');
-    } else {
-      setScriptName(`${activeProject?.name || 'Project'} - ${selected.length} Features`);
-    }
-  }, [features, activeProject, nameEditedManually]);
+  // Find existing Playwright script for a feature
+  const findFeatureScript = useCallback((featureName: string): AutomationScript | undefined => {
+    const targetName = `${featureName} Tests`.toLowerCase();
+    return scripts.find(s => s.name.toLowerCase() === targetName);
+  }, [scripts]);
 
   const selectedFeatures = features.filter(f => f.selected);
   const totalSelectedTestCases = selectedFeatures.reduce((sum, f) => sum + f.count, 0);
@@ -117,42 +122,95 @@ export function AutomationPage() {
     setFeatures(prev => prev.map(f => ({ ...f, selected: !allSelected })));
   };
 
-  const handleGenerate = async () => {
-    if (!activeProject || selectedFeatures.length === 0 || !scriptName.trim()) return;
-    const controller = new AbortController();
-    generateAbortRef.current = controller;
-    setGenerating(true);
+  // Directly run automation for one or more features using Playwright + Live Preview
+  const handleRunFeatureAutomation = async (
+    targetFeatureNames: string[],
+    options?: { forceRegenerate?: boolean; key?: string }
+  ) => {
+    if (!activeProject || targetFeatureNames.length === 0) return;
+    const runKey = options?.key || targetFeatureNames.join(',');
+    setRunningFeatureKey(runKey);
     try {
-      const res = await api.generateAutomation({
+      const matchedPage = targetFeatureNames.length === 1 ? findMatchingPage(targetFeatureNames[0]) : undefined;
+      const testedBy = localStorage.getItem('qa_tested_by') || undefined;
+
+      const res = await api.runDirectAutomation({
         projectId: activeProject.id,
-        name: scriptName.trim(),
-        description: scriptDesc.trim() || undefined,
-        tool: selectedTool,
-        groupBy: 'feature',
-        featureModules: selectedFeatures.map(f => f.featureModule),
-        pageId: selectedPageId || undefined,
-      }, controller.signal);
-      setScripts(prev => [res.script, ...prev]);
-      setLastScriptId(res.script.id);
-      navigate(`${automationBasePath}/${res.script.id}`);
-      onToast('success', 'Script generated!', res.script.name);
-      if (res.truncated) {
-        onToast('warning', 'AI response kepanjangan', 'Dipakai template dasar sebagai gantinya (bukan hasil AI) — lihat banner di editor');
+        featureModules: targetFeatureNames,
+        pageId: matchedPage?.id,
+        headless: !showBrowser,
+        forceRegenerate: options?.forceRegenerate ?? false,
+        testedBy,
+      });
+
+      setScripts(prev => {
+        const exists = prev.some(s => s.id === res.script.id);
+        return exists ? prev.map(s => s.id === res.script.id ? res.script : s) : [res.script, ...prev];
+      });
+
+      setRunReport({
+        scriptId: res.script.id,
+        scriptName: res.script.name,
+        summary: res.summary,
+        updatedTestCaseCount: res.updatedTestCaseCount,
+      });
+
+      const { passed, failed, total } = res.summary;
+      if (failed === 0) {
+        onToast(
+          'success',
+          `Semua test Passed (${passed}/${total})`,
+          `${res.updatedTestCaseCount} test case otomatis di-update ke Passed`
+        );
+      } else {
+        onToast(
+          'warning',
+          `Run selesai: ${passed} Passed, ${failed} Failed`,
+          `${res.updatedTestCaseCount} test case otomatis di-update beserta dokumentasi bug`
+        );
       }
-      // Light reset so returning to this tab doesn't silently offer to
-      // duplicate the same generate again.
-      setFeatures(prev => prev.map(f => ({ ...f, selected: false })));
-      setScriptDesc('');
     } catch (err) {
-      if (controller.signal.aborted) return;
-      onToast('error', 'Failed to generate script', (err as Error).message);
+      onToast('error', 'Gagal menjalankan Playwright Automation', (err as Error).message);
     } finally {
-      // Skipping setGenerating(false) here on abort relies on this component
-      // having already been unmounted by ProjectScopeLayout's `key={project.id}`
-      // remount (see the effect above) — if that remount is ever removed,
-      // `generating` would get stuck `true` on a still-visible instance after
-      // a project switch mid-generate. Re-check this if that changes.
-      if (!controller.signal.aborted) setGenerating(false);
+      setRunningFeatureKey(null);
+    }
+  };
+
+  const handleRunExistingScript = async (targetScript: AutomationScript, overrideCode?: string) => {
+    setRunningScriptId(targetScript.id);
+    try {
+      const testedBy = localStorage.getItem('qa_tested_by') || undefined;
+      const res = await api.runAutomationScript(targetScript.id, {
+        headless: !showBrowser,
+        ...(overrideCode !== undefined ? { script: overrideCode } : {}),
+        testedBy,
+      });
+      setScripts(prev => prev.map(s => s.id === targetScript.id ? res.script : s));
+      setRunReport({
+        scriptId: targetScript.id,
+        scriptName: targetScript.name,
+        summary: res.summary,
+        updatedTestCaseCount: res.updatedTestCaseCount,
+      });
+
+      const { passed, failed, total } = res.summary;
+      if (failed === 0) {
+        onToast(
+          'success',
+          `Semua test Passed (${passed}/${total})`,
+          `${res.updatedTestCaseCount} test case otomatis di-update ke Passed`
+        );
+      } else {
+        onToast(
+          'warning',
+          `Run selesai: ${passed} Passed, ${failed} Failed`,
+          `${res.updatedTestCaseCount} test case otomatis di-update statusnya`
+        );
+      }
+    } catch (err) {
+      onToast('error', 'Gagal menjalankan automation', (err as Error).message);
+    } finally {
+      setRunningScriptId(null);
     }
   };
 
@@ -162,51 +220,11 @@ export function AutomationPage() {
     try {
       const res = await api.updateAutomationScript(activeScript.id, { script: editedScript, name: activeScript.name });
       setScripts(prev => prev.map(s => s.id === activeScript.id ? res.script : s));
-      onToast('success', 'Script saved');
+      onToast('success', 'Script disimpan');
     } catch (err) {
-      onToast('error', 'Failed to save', (err as Error).message);
+      onToast('error', 'Gagal menyimpan script', (err as Error).message);
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(editedScript)
-      .then(() => onToast('success', 'Copied to clipboard'))
-      .catch(() => onToast('error', 'Failed to copy'));
-  };
-
-  const handleDownload = () => {
-    if (!activeScript) return;
-    const toolInfo = AUTOMATION_TOOLS.find(t => t.value === activeScript.tool) || AUTOMATION_TOOLS[0];
-    const ext = toolInfo.ext;
-    const blob = new Blob([editedScript], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = activeScript.name.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase() + ext;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    onToast('success', 'Downloaded', a.download);
-  };
-
-  const handleUpdateStatus = async (id: string, status: string) => {
-    setStatusUpdatingId(id);
-    try {
-      const res = await api.updateAutomationScript(id, { status });
-      setScripts(prev => prev.map(s => s.id === id ? res.script : s));
-      const count = res.updatedTestCaseCount;
-      onToast(
-        'success',
-        status === 'Automated' ? 'Marked as Automated' : 'Status updated',
-        typeof count === 'number' && count > 0 ? `${count} test case(s) updated` : undefined
-      );
-    } catch (err) {
-      onToast('error', 'Failed to update', (err as Error).message);
-    } finally {
-      setStatusUpdatingId(null);
     }
   };
 
@@ -219,435 +237,366 @@ export function AutomationPage() {
       if (activeScript?.id === deleteId) {
         navigate(automationBasePath);
       }
-      if (lastScriptId === deleteId) setLastScriptId(null);
       setDeleteId(null);
       const count = res.updatedTestCaseCount;
       onToast(
         'success',
-        'Script deleted',
-        typeof count === 'number' && count > 0 ? `${count} test case(s) reverted to Not Automated` : undefined
+        'Runner script dihapus',
+        typeof count === 'number' && count > 0 ? `${count} test case dikembalikan ke Not Automated` : undefined
       );
     } catch (err) {
-      onToast('error', 'Failed to delete', (err as Error).message);
+      onToast('error', 'Gagal menghapus script', (err as Error).message);
     } finally {
       setDeleteLoading(false);
     }
   };
 
-  if (!activeProject) {
-    return (
-      <div className="card p-12 flex flex-col items-center text-center text-gray-400 max-w-2xl mx-auto">
-        <svg className="w-12 h-12 mb-3 text-gray-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-        </svg>
-        <p className="text-sm font-medium text-gray-500">No active project</p>
-        <p className="text-xs mt-1">Select a project to manage automation scripts</p>
-      </div>
-    );
-  }
+  const isAnyRunning = runningFeatureKey !== null || runningScriptId !== null;
 
   return (
-    <div>
-      {/* Tab nav */}
-      <div className="flex items-center gap-4 mb-5 flex-wrap">
-        <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
-          {(['list', 'generate', ...(lastScriptId ? ['editor'] : [])] as const).map(v => (
-            <button
-              key={v}
-              onClick={() => {
-                if (v === 'editor') {
-                  if (lastScriptId) navigate(`${automationBasePath}/${lastScriptId}`);
-                } else {
-                  if (scriptId) navigate(automationBasePath);
-                  setLocalView(v as 'list' | 'generate');
-                }
-              }}
-              className={`text-xs px-3 py-1.5 rounded-md font-medium transition-colors ${
-                view === v ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {v === 'list' ? `Scripts (${scripts.length})` : v === 'generate' ? 'Generate Baru' : 'Editor'}
-            </button>
-          ))}
+    <div className="space-y-5">
+      {/* Header Bar */}
+      <div className="card p-4 flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-[#f0fbfa] border border-[#b0ece8] flex items-center justify-center text-[#089e9a]">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold text-gray-900">Playwright Live Automation Runner</h2>
+              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-[#e6f9f8] text-[#06807d] border border-[#b0ece8]">
+                Playwright Engine
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Pilih menu/feature lalu klik <strong>Run Automation</strong> — browser Playwright langsung terbuka otomatis menjalankan test case &amp; selector hasil scraping.
+            </p>
+          </div>
         </div>
-        <span className="ml-auto text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full font-medium">
-          {activeProject.name}
-        </span>
+
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-xs font-medium text-gray-700 bg-gray-50 border border-gray-200 px-3 py-1.5 rounded-lg cursor-pointer select-none hover:bg-gray-100 transition-colors">
+            <input
+              type="checkbox"
+              className="rounded text-[#0ABAB5]"
+              checked={showBrowser}
+              onChange={e => setShowBrowser(e.target.checked)}
+            />
+            <span>Live Browser Preview</span>
+          </label>
+
+          {view === 'editor' && (
+            <button
+              onClick={() => navigate(automationBasePath)}
+              className="btn-secondary text-xs"
+            >
+              ← Kembali ke Daftar Feature
+            </button>
+          )}
+        </div>
       </div>
 
-
-
-      {/* ── LIST VIEW ── */}
-      {view === 'list' && (
-        <>
-          {loading ? (
-            <div className="card p-8 flex items-center justify-center text-gray-500 text-sm">
-              <svg className="w-5 h-5 animate-spin text-blue-500 mr-2" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              Memuat scripts...
+      {/* ── RUN REPORT PANEL ── */}
+      {runReport && (
+        <div className="card p-4 border-l-4 border-[#0ABAB5]">
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900">
+                Hasil Eksekusi Playwright: {runReport.scriptName}
+              </h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Durasi: {(runReport.summary.durationMs / 1000).toFixed(2)}s ·{' '}
+                <span className="text-[#089e9a] font-medium">
+                  {runReport.updatedTestCaseCount} manual test case otomatis di-update di halaman Test Cases
+                </span>
+              </p>
             </div>
-          ) : scripts.length === 0 ? (
-            <div className="card p-12 flex flex-col items-center text-center text-gray-400">
-              <svg className="w-12 h-12 mb-3 text-gray-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-              </svg>
-              <p className="text-sm font-medium text-gray-500">Belum ada automation script</p>
-              <p className="text-xs mt-1">Pilih feature lalu generate script automation</p>
-              <button onClick={() => setLocalView('generate')} className="mt-4 btn-primary text-sm">
-                Generate Script
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {scripts.map(script => (
-                <div key={script.id} className="card p-4">
-                  <div className="flex items-start gap-3">
-                    <div className="w-9 h-9 bg-gray-900 rounded-lg flex items-center justify-center flex-shrink-0">
-                      <svg className="w-5 h-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-                      </svg>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-sm font-semibold text-gray-900">{script.name}</h3>
-                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-                          script.status === 'Automated' ? 'bg-green-100 text-green-700' :
-                          script.status === 'Generated' ? 'bg-blue-100 text-blue-700' :
-                          'bg-gray-100 text-gray-600'
-                        }`}>
-                          {script.status}
-                        </span>
-                        {script.tool && AUTOMATION_TOOLS.find(t => t.value === script.tool) && (
-                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${AUTOMATION_TOOLS.find(t => t.value === script.tool)!.color}`}>
-                            {AUTOMATION_TOOLS.find(t => t.value === script.tool)!.label}
-                          </span>
-                        )}
-                      </div>
-                      {script.description && <p className="text-xs text-gray-500 mt-0.5">{script.description}</p>}
-                      <p className="text-xs text-gray-400 mt-1">
-                        {parseTestCaseIds(script.testCaseIds).length} test case(s) ·
-                        {' '}{new Date(script.createdAt).toLocaleDateString('id-ID')}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
-                      {script.status === 'Generated' && (
-                        <button
-                          onClick={() => handleUpdateStatus(script.id, 'Automated')}
-                          disabled={statusUpdatingId === script.id}
-                          className="text-xs px-2 py-1 border border-green-200 text-green-700 rounded hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {statusUpdatingId === script.id ? 'Updating...' : 'Mark Automated'}
-                        </button>
-                      )}
-                      <button
-                        onClick={() => { setLastScriptId(script.id); navigate(`${automationBasePath}/${script.id}`); }}
-                        className="text-xs px-2 py-1 border border-gray-200 text-gray-700 rounded hover:bg-gray-50"
-                      >
-                        Buka Editor
-                      </button>
-                      <button
-                        onClick={() => setDeleteId(script.id)}
-                        className="text-xs px-2 py-1 border border-red-200 text-red-600 rounded hover:bg-red-50"
-                      >
-                        Hapus
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
-      )}
-
-      {/* ── GENERATE VIEW ── */}
-      {view === 'generate' && (
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
-          {/* Left: config */}
-          <div className="lg:col-span-2 space-y-4">
-            {/* Tool selector */}
-            <div className="card p-4 space-y-3">
-              <h3 className="text-sm font-semibold text-gray-800">1. Pilih Testing Tool</h3>
-              <div className="space-y-2">
-                {AUTOMATION_TOOLS.map(tool => (
-                  <label
-                    key={tool.value}
-                    className={`flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all ${
-                      selectedTool === tool.value
-                        ? tool.color + ' border-current'
-                        : 'border-gray-200 hover:border-gray-300 bg-white'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="tool"
-                      value={tool.value}
-                      checked={selectedTool === tool.value}
-                      onChange={() => setSelectedTool(tool.value)}
-                      className="sr-only"
-                    />
-                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
-                      selectedTool === tool.value ? 'border-current' : 'border-gray-300'
-                    }`}>
-                      {selectedTool === tool.value && (
-                        <div className="w-2 h-2 rounded-full bg-current" />
-                      )}
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold">{tool.label}</p>
-                      <p className="text-xs text-gray-500">File: <code className="bg-gray-100 px-1 rounded">{tool.ext}</code></p>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            {/* Script config */}
-            <div className="card p-4 space-y-3">
-              <h3 className="text-sm font-semibold text-gray-800">2. Konfigurasi Script</h3>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1 uppercase tracking-wide">
-                  Nama Script <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  className="input-field"
-                  placeholder="e.g. Login Tests"
-                  value={scriptName}
-                  onChange={e => {
-                    const v = e.target.value;
-                    setScriptName(v);
-                    setNameEditedManually(v !== '');
-                  }}
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1 uppercase tracking-wide">Deskripsi</label>
-                <textarea
-                  className="input-field"
-                  rows={2}
-                  placeholder="Opsional"
-                  value={scriptDesc}
-                  onChange={e => setScriptDesc(e.target.value)}
-                />
-              </div>
-              {pages.length > 0 && (
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1 uppercase tracking-wide">Halaman terkait (opsional)</label>
-                  <select
-                    className="input-field"
-                    value={selectedPageId}
-                    onChange={e => setSelectedPageId(e.target.value)}
-                  >
-                    <option value="">— Tidak ada —</option>
-                    {pages.map(p => (
-                      <option key={p.id} value={p.id}>{p.name} ({p.path})</option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-gray-400 mt-1">Konteks halaman ini (deskripsi/elemen) ikut disuntik ke prompt AI</p>
-                </div>
-              )}
-
-              {/* Summary */}
-              <div className={`rounded-lg p-3 text-xs ${selectedFeatures.length > 0 ? 'bg-blue-50 text-blue-800' : 'bg-gray-50 text-gray-500'}`}>
-                {selectedFeatures.length === 0 ? (
-                  <p>Pilih feature dari kanan untuk generate</p>
-                ) : (
-                  <div>
-                    <p className="font-semibold mb-1">Selected:</p>
-                    {selectedFeatures.map(f => (
-                      <p key={f.featureModule} className="truncate">• {f.featureModule} ({f.count} TCs)</p>
-                    ))}
-                    <p className="mt-1 font-medium">Total: {totalSelectedTestCases} test cases</p>
-                  </div>
-                )}
-              </div>
-
+            <div className="flex items-center gap-2 text-xs font-medium">
+              <span className="px-2.5 py-1 rounded-md bg-gray-100 text-gray-700">
+                Total: {runReport.summary.total}
+              </span>
+              <span className="px-2.5 py-1 rounded-md bg-emerald-100 text-emerald-800">
+                Passed: {runReport.summary.passed}
+              </span>
+              <span className="px-2.5 py-1 rounded-md bg-red-100 text-red-800">
+                Failed: {runReport.summary.failed}
+              </span>
               <button
-                onClick={handleGenerate}
-                disabled={generating || selectedFeatures.length === 0 || !scriptName.trim()}
-                className="btn-primary w-full py-2.5 text-sm font-semibold flex items-center justify-center gap-2"
+                onClick={() => setRunReport(null)}
+                className="text-gray-400 hover:text-gray-600 px-1.5 py-0.5"
+                title="Tutup laporan"
               >
-                {generating ? (
-                  <>
-                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    Generating...
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-                    </svg>
-                    Generate {AUTOMATION_TOOLS.find(t => t.value === selectedTool)?.label} Script
-                  </>
-                )}
+                ✕
               </button>
             </div>
           </div>
 
-          {/* Right: feature list */}
-          <div className="lg:col-span-3 card p-5">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <h3 className="text-sm font-semibold text-gray-800">3. Pilih Feature/Module</h3>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Dikelompokkan per generate — satu script berisi semua feature yang dipilih
-                </p>
+          <div className="space-y-1.5 max-h-72 overflow-y-auto">
+            {runReport.summary.results.map((r, idx) => (
+              <div
+                key={idx}
+                className={`p-2.5 rounded-lg border text-xs ${
+                  r.status === 'passed'
+                    ? 'bg-emerald-50/60 border-emerald-200 text-emerald-900'
+                    : 'bg-red-50/70 border-red-200 text-red-900'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className={`px-1.5 py-0.5 rounded font-semibold uppercase text-[10px] ${
+                        r.status === 'passed'
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-red-600 text-white'
+                      }`}
+                    >
+                      {r.status}
+                    </span>
+                    {r.testCaseId && (
+                      <span className="font-mono font-semibold text-gray-700 bg-white px-1.5 py-0.5 rounded border border-gray-200">
+                        {r.testCaseId}
+                      </span>
+                    )}
+                    <span className="font-medium truncate">{r.title}</span>
+                  </div>
+                  <span className="text-gray-500 flex-shrink-0">{r.durationMs}ms</span>
+                </div>
+                {r.error && (
+                  <pre className="mt-1.5 p-2 rounded bg-gray-900 text-red-300 font-mono text-[11px] whitespace-pre-wrap overflow-x-auto">
+                    {r.error}
+                  </pre>
+                )}
               </div>
-              {features.length > 0 && (
-                <button
-                  onClick={toggleAllFeatures}
-                  className="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-2 py-1 hover:bg-blue-50"
-                >
-                  {features.every(f => f.selected) ? 'Deselect All' : 'Select All'}
-                </button>
-              )}
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── MAIN DIRECT RUNNER VIEW ── */}
+      {view === 'runner' && (
+        <div className="card p-5">
+          <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900">Daftar Feature / Menu Siap Run</h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Klik <strong>▶ Run Automation</strong> pada feature mana saja untuk langsung menjalankan pengujian dengan Playwright &amp; Live Preview.
+              </p>
             </div>
 
-            {loading ? (
-              <div className="flex items-center justify-center py-12 text-gray-400 text-sm">
-                <svg className="w-5 h-5 animate-spin text-blue-500 mr-2" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                Memuat features...
-              </div>
-            ) : features.length === 0 ? (
-              <div className="text-center py-12 text-gray-400">
-                <svg className="w-10 h-10 mx-auto mb-2 text-gray-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                <p className="text-xs">Belum ada test case tersimpan di project ini</p>
-              </div>
-            ) : (
-              <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
-                {features.map((f, idx) => (
-                  <label
-                    key={f.featureModule}
-                    className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
-                      f.selected
-                        ? 'bg-blue-50 border-blue-300'
-                        : 'bg-white border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                    }`}
+            {features.length > 0 && (
+              <div className="flex items-center gap-2">
+                {selectedFeatures.length > 0 && (
+                  <button
+                    onClick={() =>
+                      handleRunFeatureAutomation(
+                        selectedFeatures.map(f => f.featureModule),
+                        { key: '__batch__' }
+                      )
+                    }
+                    disabled={isAnyRunning}
+                    className="btn-primary text-xs flex items-center gap-1.5"
                   >
-                    <input
-                      type="checkbox"
-                      className="rounded flex-shrink-0"
-                      checked={f.selected}
-                      onChange={() => toggleFeature(idx)}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-sm font-medium truncate ${f.selected ? 'text-blue-800' : 'text-gray-800'}`}>
-                        {f.featureModule}
-                      </p>
-                    </div>
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${
-                      f.selected ? 'bg-blue-200 text-blue-800' : 'bg-gray-100 text-gray-500'
-                    }`}>
-                      {f.count} TC
-                    </span>
-                  </label>
-                ))}
+                    {runningFeatureKey === '__batch__' ? (
+                      <>
+                        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        Menjalankan {selectedFeatures.length} Feature...
+                      </>
+                    ) : (
+                      <>▶ Run {selectedFeatures.length} Feature Terpilih ({totalSelectedTestCases} TC)</>
+                    )}
+                  </button>
+                )}
+                <button
+                  onClick={toggleAllFeatures}
+                  className="btn-secondary text-xs"
+                >
+                  {features.every(f => f.selected) ? 'Batal Pilih Semua' : 'Pilih Semua'}
+                </button>
               </div>
             )}
           </div>
+
+          {loading ? (
+            <div className="py-12 flex items-center justify-center text-gray-500 text-sm">
+              <svg className="w-5 h-5 animate-spin text-[#0ABAB5] mr-2" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Memuat daftar feature...
+            </div>
+          ) : features.length === 0 ? (
+            <div className="py-12 flex flex-col items-center text-center text-gray-400">
+              <svg className="w-12 h-12 mb-3 text-gray-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.25} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <p className="text-sm font-medium text-gray-600">Belum ada Manual Test Case di project ini</p>
+              <p className="text-xs text-gray-400 mt-1">
+                Silakan scan halaman di menu <strong>Pages &amp; Scan</strong> lalu buat test case di menu <strong>Generate</strong> terlebih dahulu.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {features.map((f, idx) => {
+                const matchedPage = findMatchingPage(f.featureModule);
+                const selectorCount = countPageElements(matchedPage?.elements);
+                const existingScript = findFeatureScript(f.featureModule);
+                const isRunningThis =
+                  runningFeatureKey === f.featureModule ||
+                  runningFeatureKey === `${f.featureModule}:rebuild` ||
+                  (existingScript && runningScriptId === existingScript.id);
+
+                return (
+                  <div
+                    key={f.featureModule}
+                    className={`p-4 rounded-xl border transition-all flex items-center justify-between flex-wrap gap-3 ${
+                      f.selected
+                        ? 'bg-[#f0fbfa] border-[#7fdcd8]'
+                        : 'bg-white border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <input
+                        type="checkbox"
+                        className="mt-1 rounded flex-shrink-0"
+                        checked={f.selected}
+                        onChange={() => toggleFeature(idx)}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="text-sm font-semibold text-gray-900">{f.featureModule}</h4>
+                          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
+                            {f.count} Test Case
+                          </span>
+                          {existingScript?.status === 'Automated' && (
+                            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                              ✓ Sudah Di-run
+                            </span>
+                          )}
+                          {matchedPage && selectorCount > 0 ? (
+                            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-[#e6f9f8] text-[#06807d] border border-[#b0ece8]">
+                              ⚡ {selectorCount} Selector Scraped ({matchedPage.path})
+                            </span>
+                          ) : (
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                              Belum ada selector halaman terkait
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {matchedPage
+                            ? `Terhubung otomatis dengan hasil scraping halaman "${matchedPage.name}" (${matchedPage.path})${matchedPage.requiresAuth ? ' + auto-login' : ''}.`
+                            : 'Akan dijalankan menggunakan locator teks/elemen dari langkah test case.'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
+                      <button
+                        onClick={() =>
+                          handleRunFeatureAutomation([f.featureModule], {
+                            key: f.featureModule,
+                          })
+                        }
+                        disabled={isAnyRunning}
+                        className="btn-primary text-xs px-3.5 py-2 flex items-center gap-1.5 font-semibold"
+                      >
+                        {runningFeatureKey === f.featureModule ? (
+                          <>
+                            <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                            </svg>
+                            Running Live Preview...
+                          </>
+                        ) : (
+                          <>▶ Run Automation</>
+                        )}
+                      </button>
+
+                      {existingScript && (
+                        <>
+                          <button
+                            onClick={() =>
+                              handleRunFeatureAutomation([f.featureModule], {
+                                forceRegenerate: true,
+                                key: `${f.featureModule}:rebuild`,
+                              })
+                            }
+                            disabled={isAnyRunning}
+                            title="Sinkronkan ulang dengan perubahan test case / selector terbaru lalu jalankan"
+                            className="btn-secondary text-xs py-1.5 px-2.5"
+                          >
+                            {runningFeatureKey === `${f.featureModule}:rebuild` ? 'Sync & Running...' : '↻ Sync & Run Ulang'}
+                          </button>
+                          <button
+                            onClick={() => navigate(`${automationBasePath}/${existingScript.id}`)}
+                            disabled={Boolean(isRunningThis)}
+                            className="text-xs px-2.5 py-1.5 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50"
+                          >
+                            Lihat Script
+                          </button>
+                          <button
+                            onClick={() => setDeleteId(existingScript.id)}
+                            disabled={Boolean(isRunningThis)}
+                            className="text-xs px-2 py-1.5 border border-red-200 text-red-600 rounded-lg hover:bg-red-50"
+                            title="Hapus script runner"
+                          >
+                            Hapus
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
-      {/* ── EDITOR VIEW ── */}
+      {/* ── OPTIONAL SCRIPT VIEWER / EDITOR ── */}
       {view === 'editor' && activeScript && (
-        <div className="space-y-3">
-        {/* Fallback-template banner — AI generation failed for this script */}
-        {activeScript.generationSource === 'fallback' && (
-          <div className="flex items-start gap-3 bg-amber-50 border border-amber-300 rounded-lg px-4 py-3 text-xs text-amber-900">
-            <svg className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-            <div className="space-y-1">
-              <p className="font-semibold">AI generation failed — this is a bare-bones template</p>
-              <p className="text-amber-800 leading-relaxed">
-                The AI service was unavailable or errored when this script was created, so a basic
-                boilerplate template was used instead. Review carefully — it likely needs significantly
-                more manual work than an AI-generated script.
-              </p>
-            </div>
-          </div>
-        )}
-        {/* Info banner — hanya muncul jika script masih Generated (belum disesuaikan) */}
-        {activeScript.status !== 'Automated' && (
-          <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-xs text-blue-800">
-            <svg className="w-4 h-4 flex-shrink-0 mt-0.5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <div className="space-y-1">
-              <p className="font-semibold">Script perlu disesuaikan sebelum dijalankan</p>
-              <p className="text-blue-700 leading-relaxed">
-                Cari <code className="bg-blue-100 px-1 rounded font-mono">TODO_SELECTOR</code> — ganti dengan CSS selector / XPath elemen di aplikasimu (misal: <code className="bg-blue-100 px-1 rounded font-mono">#login-btn</code>, <code className="bg-blue-100 px-1 rounded font-mono">[data-testid="submit"]</code>).
-                {!activeProject?.projectUrl && (
-                  <> Cari <code className="bg-blue-100 px-1 rounded font-mono">TODO_URL</code> — ganti dengan URL aplikasi yang diuji. Atau isi <strong>Project URL</strong> di halaman Projects agar otomatis terisi.</>
-                )}
-              </p>
-            </div>
-          </div>
-        )}
         <div className="card overflow-hidden">
-          {/* Editor header */}
           <div className="flex items-center justify-between px-4 py-3 bg-gray-900 text-white flex-wrap gap-2">
             <div className="flex items-center gap-2">
-              <svg className="w-4 h-4 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-              </svg>
               <span className="text-sm font-medium">{activeScript.name}</span>
-              <span className={`text-xs px-1.5 py-0.5 rounded font-medium ml-1 ${
-                activeScript.status === 'Automated' ? 'bg-green-800 text-green-200' :
-                activeScript.status === 'Generated' ? 'bg-blue-800 text-blue-200' :
-                'bg-gray-700 text-gray-300'
-              }`}>
-                {activeScript.status}
+              <span className="text-xs px-2 py-0.5 rounded bg-[#089e9a] text-white font-medium">
+                Playwright
               </span>
-              {activeScript.tool && AUTOMATION_TOOLS.find(t => t.value === activeScript.tool) && (
-                <span className="text-xs px-1.5 py-0.5 rounded font-medium bg-gray-700 text-gray-200">
-                  {AUTOMATION_TOOLS.find(t => t.value === activeScript.tool)!.label}
-                </span>
-              )}
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={handleCopy} className="text-xs text-gray-300 hover:text-white flex items-center gap-1">
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-                Copy
-              </button>
-              <button onClick={handleDownload} className="text-xs text-gray-300 hover:text-white flex items-center gap-1">
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                Download
-              </button>
               <button
                 onClick={handleSaveScript}
                 disabled={saving}
-                className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded"
+                className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-md font-medium"
               >
-                {saving ? 'Saving...' : 'Save'}
+                {saving ? 'Menyimpan...' : 'Simpan Perubahan'}
               </button>
-              {activeScript.status === 'Generated' && (
-                <button
-                  onClick={() => handleUpdateStatus(activeScript.id, 'Automated')}
-                  disabled={statusUpdatingId === activeScript.id}
-                  className="text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {statusUpdatingId === activeScript.id ? 'Updating...' : 'Mark Automated'}
-                </button>
-              )}
+              <button
+                onClick={() => handleRunExistingScript(activeScript, editedScript)}
+                disabled={isAnyRunning}
+                className="text-xs bg-[#0ABAB5] hover:bg-[#089e9a] text-white px-3.5 py-1.5 rounded-md font-semibold flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {runningScriptId === activeScript.id ? (
+                  <>
+                    <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Running Live Preview...
+                  </>
+                ) : (
+                  <>▶ Run Automation</>
+                )}
+              </button>
             </div>
           </div>
-          {/* Code textarea */}
           <textarea
             className="w-full p-4 font-mono text-xs bg-gray-950 text-gray-100 min-h-[520px] border-0 focus:outline-none resize-none"
             value={editedScript}
@@ -655,37 +604,12 @@ export function AutomationPage() {
             spellCheck={false}
           />
         </div>
-        </div>
-      )}
-
-      {/* ── EDITOR VIEW: script not found (deleted, or bad URL) ── */}
-      {view === 'editor' && loading && !activeScript && (
-        <div className="card p-8 flex items-center justify-center text-gray-500 text-sm">
-          <svg className="w-5 h-5 animate-spin text-blue-500 mr-2" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
-          Memuat script...
-        </div>
-      )}
-
-      {view === 'editor' && !activeScript && !loading && (
-        <div className="card p-12 flex flex-col items-center text-center text-gray-400">
-          <svg className="w-12 h-12 mb-3 text-gray-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-          <p className="text-sm font-medium text-gray-500">Script not found</p>
-          <p className="text-xs mt-1">It may have been deleted.</p>
-          <button onClick={() => navigate(automationBasePath)} className="mt-4 btn-secondary text-sm">
-            Back to list
-          </button>
-        </div>
       )}
 
       {deleteId && (
         <ConfirmModal
-          title="Hapus Script"
-          message={`Hapus "${scripts.find(s => s.id === deleteId)?.name}"? Tindakan ini tidak bisa dibatalkan.`}
+          title="Hapus Script Runner"
+          message={`Hapus runner "${scripts.find(s => s.id === deleteId)?.name}"? Anda tetap bisa klik Run Automation kapan saja untuk membuatnya kembali secara otomatis.`}
           confirmLabel="Hapus"
           variant="danger"
           loading={deleteLoading}
